@@ -6,110 +6,335 @@
   <title>Player Data API – Demo</title>
   <style>
     :root {
-      --bg: #0f1419;
-      --surface: #1a2332;
-      --border: #2d3a4d;
-      --text: #e6edf3;
-      --muted: #8b949e;
-      --accent: #58a6ff;
-      --success: #3fb950;
-      --error: #f85149;
+      --bg: #091521;
+      --bg-2: #102336;
+      --surface: #162b3e;
+      --border: #2a4761;
+      --text: #e7f1fb;
+      --muted: #96b2c8;
+      --accent: #7ed0ff;
+      --success: #49c57f;
+      --error: #ff6b6b;
+      --shadow: 0 14px 30px rgba(0, 0, 0, 0.25);
     }
+
     * { box-sizing: border-box; }
+
     body {
-      font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
-      background: var(--bg);
-      color: var(--text);
       margin: 0;
-      padding: 1.5rem;
-      line-height: 1.5;
+      padding: 1.25rem;
+      font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 85% 10%, #1f4f71 0%, transparent 45%),
+        radial-gradient(circle at 15% 90%, #12324b 0%, transparent 50%),
+        linear-gradient(160deg, var(--bg) 0%, var(--bg-2) 100%);
+      min-height: 100vh;
+      line-height: 1.45;
     }
-    h1 { font-size: 1.25rem; margin: 0 0 1rem; color: var(--accent); }
+
+    h1 {
+      margin: 0 0 0.4rem;
+      color: var(--accent);
+      font-size: 1.35rem;
+    }
+
+    p.lead {
+      margin: 0 0 1.2rem;
+      color: var(--muted);
+      max-width: 950px;
+      font-size: 0.9rem;
+    }
+
+    .layout {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      align-items: start;
+    }
+
     .card {
-      background: var(--surface);
+      background: linear-gradient(150deg, rgba(22, 43, 62, 0.96), rgba(11, 30, 45, 0.95));
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.1rem;
+      box-shadow: var(--shadow);
+    }
+
+    .card.search {
+      grid-column: 1 / -1;
+    }
+
+    .card h2 {
+      margin: 0 0 0.65rem;
+      font-size: 1rem;
+      color: var(--accent);
+    }
+
+    label {
+      display: block;
+      margin-bottom: 0.3rem;
+      color: var(--muted);
+      font-size: 0.75rem;
+      letter-spacing: 0.01em;
+    }
+
+    input[type="text"],
+    input[type="number"],
+    select {
+      width: 100%;
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 1rem 1.25rem;
-      margin-bottom: 1rem;
-      max-width: 640px;
-    }
-    label { display: block; margin-bottom: 0.35rem; color: var(--muted); font-size: 0.85rem; }
-    input[type="text"] {
-      width: 100%;
-      padding: 0.5rem 0.75rem;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
+      padding: 0.45rem 0.65rem;
       color: var(--text);
+      background: rgba(3, 12, 20, 0.55);
       font-family: inherit;
-      margin-bottom: 0.75rem;
+      font-size: 0.82rem;
     }
+
+    .grid {
+      display: grid;
+      gap: 0.7rem;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      margin-bottom: 0.8rem;
+    }
+
+    .grid.key {
+      grid-template-columns: minmax(220px, 1fr) auto;
+      align-items: end;
+    }
+
+    .buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.45rem;
+    }
+
     button {
-      padding: 0.5rem 1rem;
-      background: var(--accent);
-      color: var(--bg);
-      border: none;
-      border-radius: 6px;
+      border: 0;
+      border-radius: 8px;
+      padding: 0.48rem 0.85rem;
       font-family: inherit;
+      font-size: 0.8rem;
       font-weight: 600;
+      color: #082236;
+      background: linear-gradient(120deg, #8ed9ff, #66c2ff);
       cursor: pointer;
-      margin-right: 0.5rem;
-      margin-bottom: 0.5rem;
     }
-    button:hover { filter: brightness(1.1); }
+
+    button.secondary {
+      color: var(--text);
+      background: rgba(126, 208, 255, 0.14);
+      border: 1px solid var(--border);
+    }
+
+    button:hover { filter: brightness(1.08); }
+
+    .status {
+      margin-top: 0.6rem;
+      color: var(--muted);
+      font-size: 0.75rem;
+    }
+
     .out {
-      margin-top: 0.75rem;
-      padding: 0.75rem;
-      background: var(--bg);
-      border-radius: 6px;
-      font-size: 0.85rem;
+      margin-top: 0.7rem;
+      padding: 0.7rem;
+      border-radius: 8px;
+      border-left: 4px solid transparent;
+      background: rgba(3, 12, 20, 0.6);
+      color: var(--text);
+      font-size: 0.79rem;
       white-space: pre-wrap;
-      word-break: break-all;
+      word-break: break-word;
+      overflow-x: auto;
     }
-    .out.success { border-left: 3px solid var(--success); }
-    .out.error { border-left: 3px solid var(--error); }
-    table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
-    th, td { text-align: left; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border); }
-    th { color: var(--muted); }
+
+    .out.success { border-left-color: var(--success); }
+    .out.error { border-left-color: var(--error); }
+
+    .summary {
+      margin-bottom: 0.6rem;
+      color: var(--muted);
+      font-size: 0.76rem;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.76rem;
+      min-width: 740px;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 0.38rem 0.5rem;
+      border-bottom: 1px solid rgba(150, 178, 200, 0.24);
+    }
+
+    th {
+      color: #b7d5ea;
+      background: rgba(34, 74, 103, 0.26);
+      position: sticky;
+      top: 0;
+    }
+
+    @media (max-width: 720px) {
+      body { padding: 0.9rem; }
+      .grid.key { grid-template-columns: 1fr; }
+      table { min-width: 640px; }
+    }
   </style>
 </head>
 <body>
   <h1>Player Data API – Demo</h1>
-  <p style="color: var(--muted); margin-bottom: 1.5rem;">License check, pull (GET /players), push (POST /usage).</p>
+  <p class="lead">License check, full-stack player search with filters/sorting, and usage push.</p>
 
-  <div class="card">
-    <label for="apiKey">API Key (X-API-Key)</label>
-    <input type="text" id="apiKey" placeholder="your-secret-key" autocomplete="off" />
-  </div>
+  <div class="layout">
+    <div class="card">
+      <h2>API Key</h2>
+      <div class="grid key">
+        <div>
+          <label for="apiKey">X-API-Key</label>
+          <input type="text" id="apiKey" placeholder="your-secret-key" autocomplete="off" />
+        </div>
+        <div class="buttons">
+          <button type="button" id="btnLoadFilters" class="secondary">Load filters</button>
+        </div>
+      </div>
+      <div id="filterStatus" class="status">Filter options are loaded from <code>GET /players/filters</code>.</div>
+    </div>
 
-  <div class="card">
-    <strong>1. License check</strong>
-    <p style="color: var(--muted); font-size: 0.85rem; margin: 0.35rem 0 0.5rem;">GET /license/check with header</p>
-    <button type="button" id="btnCheck">Check license</button>
-    <div id="outCheck" class="out" style="display:none;"></div>
-  </div>
+    <div class="card">
+      <h2>1) License Check</h2>
+      <button type="button" id="btnCheck">Check license</button>
+      <div id="outCheck" class="out" style="display:none;"></div>
+    </div>
 
-  <div class="card">
-    <strong>2. Pull players</strong>
-    <p style="color: var(--muted); font-size: 0.85rem; margin: 0.35rem 0 0.5rem;">GET /players (optional: ?limit=5&team=LAD)</p>
-    <button type="button" id="btnPull">Pull players</button>
-    <div id="outPull" class="out" style="display:none;"></div>
-  </div>
+    <div class="card">
+      <h2>3) Push Usage</h2>
+      <button type="button" id="btnPush">Push usage</button>
+      <div id="outPush" class="out" style="display:none;"></div>
+    </div>
 
-  <div class="card">
-    <strong>3. Push usage</strong>
-    <p style="color: var(--muted); font-size: 0.85rem; margin: 0.35rem 0 0.5rem;">POST /usage with sample event</p>
-    <button type="button" id="btnPush">Push usage</button>
-    <div id="outPush" class="out" style="display:none;"></div>
+    <div class="card search">
+      <h2>2) Pull Players (Search + Filters + Sorting)</h2>
+
+      <div class="grid">
+        <div style="grid-column: 1 / -1;">
+          <label for="search">Search (name, id, team, position)</label>
+          <input id="search" type="text" placeholder="e.g. soto" />
+        </div>
+
+        <div>
+          <label for="team">Team</label>
+          <select id="team">
+            <option value="">Any team</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="position">Position</label>
+          <select id="position">
+            <option value="">Any position</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="sortBy">Sort by</label>
+          <select id="sortBy">
+            <option value="fpts">fpts</option>
+            <option value="playerName">playerName</option>
+            <option value="team">team</option>
+            <option value="position">position</option>
+            <option value="hr">hr</option>
+            <option value="rbi">rbi</option>
+            <option value="avg">avg</option>
+            <option value="sb">sb</option>
+            <option value="obp">obp</option>
+            <option value="slg">slg</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="sortOrder">Sort order</label>
+          <select id="sortOrder">
+            <option value="desc">desc</option>
+            <option value="asc">asc</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="limit">Limit</label>
+          <input id="limit" type="number" min="1" max="200" value="25" />
+        </div>
+
+        <div>
+          <label for="offset">Offset</label>
+          <input id="offset" type="number" min="0" value="0" />
+        </div>
+
+        <div>
+          <label for="minFpts">Min fpts</label>
+          <input id="minFpts" type="number" step="1" placeholder="-" />
+        </div>
+
+        <div>
+          <label for="maxFpts">Max fpts</label>
+          <input id="maxFpts" type="number" step="1" placeholder="-" />
+        </div>
+
+        <div>
+          <label for="minHr">Min hr</label>
+          <input id="minHr" type="number" step="1" placeholder="-" />
+        </div>
+
+        <div>
+          <label for="maxHr">Max hr</label>
+          <input id="maxHr" type="number" step="1" placeholder="-" />
+        </div>
+
+        <div>
+          <label for="minRbi">Min rbi</label>
+          <input id="minRbi" type="number" step="1" placeholder="-" />
+        </div>
+
+        <div>
+          <label for="maxRbi">Max rbi</label>
+          <input id="maxRbi" type="number" step="1" placeholder="-" />
+        </div>
+
+        <div>
+          <label for="minAvg">Min avg</label>
+          <input id="minAvg" type="number" step="0.001" placeholder="-" />
+        </div>
+
+        <div>
+          <label for="maxAvg">Max avg</label>
+          <input id="maxAvg" type="number" step="0.001" placeholder="-" />
+        </div>
+      </div>
+
+      <div class="buttons">
+        <button type="button" id="btnPull">Search players</button>
+        <button type="button" id="btnReset" class="secondary">Reset filters</button>
+      </div>
+      <div id="outPull" class="out" style="display:none;"></div>
+    </div>
   </div>
 
   <script>
     const API_BASE = '';
-    function getKey() { return document.getElementById('apiKey').value.trim(); }
+
+    function getKey() {
+      return document.getElementById('apiKey').value.trim();
+    }
+
     function headers() {
       const key = getKey();
       return key ? { 'X-API-Key': key, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
     }
+
     function showOut(id, text, isError) {
       const el = document.getElementById(id);
       el.textContent = text;
@@ -117,53 +342,224 @@
       el.style.display = 'block';
     }
 
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function setFilterStatus(message, isError) {
+      const el = document.getElementById('filterStatus');
+      el.textContent = message;
+      el.style.color = isError ? 'var(--error)' : 'var(--muted)';
+    }
+
+    function populateSelect(id, items, defaultLabel) {
+      const select = document.getElementById(id);
+      const current = select.value;
+      select.innerHTML = `<option value="">${defaultLabel}</option>`;
+      items.forEach((value) => {
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        select.appendChild(option);
+      });
+      if ([...select.options].some((opt) => opt.value === current)) {
+        select.value = current;
+      }
+    }
+
+    function maybeSetSortFields(sortFields) {
+      const select = document.getElementById('sortBy');
+      if (!Array.isArray(sortFields) || !sortFields.length) return;
+      const current = select.value || 'fpts';
+      select.innerHTML = '';
+      sortFields.forEach((field) => {
+        const option = document.createElement('option');
+        option.value = field;
+        option.textContent = field;
+        select.appendChild(option);
+      });
+      select.value = sortFields.includes(current) ? current : 'fpts';
+    }
+
+    async function loadFilters() {
+      try {
+        const response = await fetch(API_BASE + '/players/filters', { headers: headers() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          setFilterStatus((data.error || response.statusText) + ' while loading filters.', true);
+          return;
+        }
+        const filters = data.filters || {};
+        populateSelect('team', filters.teams || [], 'Any team');
+        populateSelect('position', filters.positions || [], 'Any position');
+        maybeSetSortFields(filters.sortFields || []);
+        setFilterStatus(`Loaded ${filters.teams?.length || 0} teams and ${filters.positions?.length || 0} positions.`, false);
+      } catch (error) {
+        setFilterStatus(error.message, true);
+      }
+    }
+
+    function buildPlayersQuery() {
+      const fields = [
+        'search',
+        'team',
+        'position',
+        'sortBy',
+        'sortOrder',
+        'limit',
+        'offset',
+        'minFpts',
+        'maxFpts',
+        'minHr',
+        'maxHr',
+        'minRbi',
+        'maxRbi',
+        'minAvg',
+        'maxAvg',
+      ];
+      const params = new URLSearchParams();
+      fields.forEach((field) => {
+        const input = document.getElementById(field);
+        if (!input) return;
+        const value = String(input.value || '').trim();
+        if (!value) return;
+        params.set(field, value);
+      });
+      return params;
+    }
+
+    function renderPlayersResult(data, queryString) {
+      const out = document.getElementById('outPull');
+      const players = Array.isArray(data.players) ? data.players : [];
+      const total = Number(data.total || 0);
+      const sort = data.sort || {};
+      const filters = data.filters || {};
+
+      const filterSummary = [
+        filters.search ? `search=${escapeHtml(filters.search)}` : null,
+        (filters.teams || []).length ? `team=${escapeHtml(filters.teams.join(','))}` : null,
+        (filters.positions || []).length ? `position=${escapeHtml(filters.positions.join(','))}` : null,
+        Object.entries(filters.ranges || {}).map(([field, range]) => {
+          const left = range.min ?? '-';
+          const right = range.max ?? '-';
+          return `${escapeHtml(field)}:[${escapeHtml(left)}..${escapeHtml(right)}]`;
+        }).join(' '),
+      ].filter(Boolean).join(' | ') || 'none';
+
+      let html = '<div class="summary">';
+      html += `Query: <code>${escapeHtml(queryString || 'none')}</code><br>`;
+      html += `Showing ${players.length} of ${total} total | sort=${escapeHtml(sort.by || '-')}:${escapeHtml(sort.order || '-')}<br>`;
+      html += `Filters: ${filterSummary}`;
+      html += '</div>';
+
+      if (!players.length) {
+        html += '<div>No players matched this query.</div>';
+      } else {
+        html += '<table><thead><tr>';
+        html += '<th>id</th><th>playerName</th><th>team</th><th>position</th><th>hr</th><th>rbi</th><th>avg</th><th>fpts</th><th>sb</th>';
+        html += '</tr></thead><tbody>';
+        players.forEach((player) => {
+          html += '<tr>';
+          html += `<td>${escapeHtml(player.id)}</td>`;
+          html += `<td>${escapeHtml(player.playerName)}</td>`;
+          html += `<td>${escapeHtml(player.team)}</td>`;
+          html += `<td>${escapeHtml(player.position)}</td>`;
+          html += `<td>${escapeHtml(player.hr)}</td>`;
+          html += `<td>${escapeHtml(player.rbi)}</td>`;
+          html += `<td>${escapeHtml(player.avg)}</td>`;
+          html += `<td>${escapeHtml(player.fpts)}</td>`;
+          html += `<td>${escapeHtml(player.sb)}</td>`;
+          html += '</tr>';
+        });
+        html += '</tbody></table>';
+      }
+
+      out.innerHTML = html;
+      out.className = 'out success';
+      out.style.display = 'block';
+    }
+
+    function resetPullFilters() {
+      [
+        'search',
+        'team',
+        'position',
+        'minFpts',
+        'maxFpts',
+        'minHr',
+        'maxHr',
+        'minRbi',
+        'maxRbi',
+        'minAvg',
+        'maxAvg',
+      ].forEach((id) => {
+        const input = document.getElementById(id);
+        if (input) input.value = '';
+      });
+      document.getElementById('sortBy').value = 'fpts';
+      document.getElementById('sortOrder').value = 'desc';
+      document.getElementById('limit').value = '25';
+      document.getElementById('offset').value = '0';
+      document.getElementById('outPull').style.display = 'none';
+    }
+
+    document.getElementById('btnLoadFilters').addEventListener('click', loadFilters);
+
+    document.getElementById('apiKey').addEventListener('change', () => {
+      if (getKey()) loadFilters();
+    });
+
     document.getElementById('btnCheck').addEventListener('click', async () => {
       const out = 'outCheck';
       try {
-        const r = await fetch(API_BASE + '/license/check', { headers: headers() });
-        const data = await r.json().catch(() => ({}));
-        if (r.ok) showOut(out, JSON.stringify(data, null, 2), false);
-        else showOut(out, (data.error || r.statusText) + '\n' + JSON.stringify(data, null, 2), true);
-      } catch (e) { showOut(out, e.message, true); }
+        const response = await fetch(API_BASE + '/license/check', { headers: headers() });
+        const data = await response.json().catch(() => ({}));
+        if (response.ok) showOut(out, JSON.stringify(data, null, 2), false);
+        else showOut(out, (data.error || response.statusText) + '\n' + JSON.stringify(data, null, 2), true);
+      } catch (error) {
+        showOut(out, error.message, true);
+      }
     });
 
     document.getElementById('btnPull').addEventListener('click', async () => {
       const out = 'outPull';
       try {
-        const r = await fetch(API_BASE + '/players?limit=10', { headers: headers() });
-        const data = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          showOut(out, (data.error || r.statusText) + '\n' + JSON.stringify(data, null, 2), true);
+        const params = buildPlayersQuery();
+        const queryString = params.toString();
+        const response = await fetch(API_BASE + '/players' + (queryString ? `?${queryString}` : ''), { headers: headers() });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          showOut(out, (data.error || response.statusText) + '\n' + JSON.stringify(data, null, 2), true);
           return;
         }
-        const total = data.total ?? data.players?.length ?? 0;
-        let html = 'Total: ' + total + '\n\n';
-        if (data.players && data.players.length) {
-          html += '<table><thead><tr><th>id</th><th>playerName</th><th>team</th><th>position</th><th>hr</th><th>rbi</th><th>avg</th><th>fpts</th></tr></thead><tbody>';
-          data.players.forEach(p => {
-            html += `<tr><td>${p.id}</td><td>${p.playerName}</td><td>${p.team}</td><td>${p.position}</td><td>${p.hr}</td><td>${p.rbi}</td><td>${p.avg}</td><td>${p.fpts}</td></tr>`;
-          });
-          html += '</tbody></table>';
-        }
-        document.getElementById(out).innerHTML = html;
-        document.getElementById(out).className = 'out success';
-        document.getElementById(out).style.display = 'block';
-      } catch (e) { showOut(out, e.message, true); }
+        renderPlayersResult(data, queryString);
+      } catch (error) {
+        showOut(out, error.message, true);
+      }
     });
+
+    document.getElementById('btnReset').addEventListener('click', resetPullFilters);
 
     document.getElementById('btnPush').addEventListener('click', async () => {
       const out = 'outPush';
       const body = { event: 'draft_view', timestamp: new Date().toISOString(), metadata: { source: 'demo' } };
       try {
-        const r = await fetch(API_BASE + '/usage', {
+        const response = await fetch(API_BASE + '/usage', {
           method: 'POST',
           headers: headers(),
           body: JSON.stringify(body),
         });
-        const data = await r.json().catch(() => ({}));
-        if (r.ok) showOut(out, JSON.stringify(data, null, 2), false);
-        else showOut(out, (data.error || r.statusText) + '\n' + JSON.stringify(data, null, 2), true);
-      } catch (e) { showOut(out, e.message, true); }
+        const data = await response.json().catch(() => ({}));
+        if (response.ok) showOut(out, JSON.stringify(data, null, 2), false);
+        else showOut(out, (data.error || response.statusText) + '\n' + JSON.stringify(data, null, 2), true);
+      } catch (error) {
+        showOut(out, error.message, true);
+      }
     });
   </script>
 </body>
