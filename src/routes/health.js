@@ -1,8 +1,8 @@
 const express = require('express');
+const { getHealth } = require('../controllers/healthController');
+
 const router = express.Router();
 
-router.get('/', (_req, res) => {
-  res.json({ success: true, status: 'ok', service: 'player-data-api' });
-});
+router.get('/', getHealth);
 
 module.exports = router;
