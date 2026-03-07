@@ -9,10 +9,15 @@ Standalone **licensable** Player Data API for a fantasy baseball draft kit. Supp
 | GET    | /health         | Health check               | No               |
 | GET    | /license/check  | Validate license           | Yes              |
 | GET    | /players        | Pull player data           | Yes              |
+| GET    | /players/filters| Get search filter options  | Yes              |
 | POST   | /usage          | Push usage/event from app  | Yes              |
 
 - **License**: Send `X-API-Key: <key>` or `Authorization: Bearer <key>`.
-- **GET /players** query params (optional): `search`, `team`, `position`, `limit`, `offset`.
+- **GET /players** query params (optional):
+  - Base filters: `search`, `team`, `position`
+  - Numeric ranges: `minFpts`, `maxFpts`, `minHr`, `maxHr`, `minRbi`, `maxRbi`, `minAvg`, `maxAvg` (plus same pattern for `ab,r,h,bb,k,sb,obp,slg`)
+  - Sorting/paging: `sortBy`, `sortOrder` (`asc`/`desc`), `limit`, `offset`
+- **GET /players/filters** returns available `teams`, `positions`, and supported `sortFields`.
 - **POST /usage** body: `{ "event": "...", "timestamp": "ISO8601", "metadata": {} }`.
 
 ## Player data from CSV
@@ -50,8 +55,14 @@ npm start
 Open `http://localhost:4001` (or `/demo.html`) to use the small front end:
 
 1. **License check** – GET /license/check with your API key
-2. **Pull players** – GET /players, view list/count
+2. **Pull players** – Search + filter + sort from the UI (full stack via GET /players and GET /players/filters)
 3. **Push usage** – POST /usage with a sample event
+
+## Project structure
+
+- `src/routes/*` only defines endpoints and middleware.
+- `src/controllers/*` contains request handlers.
+- `src/services/playersService.js` contains player data loading, filter parsing, sorting, and pagination logic.
 
 ## Troubleshooting
 
