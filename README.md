@@ -50,6 +50,28 @@ npm start
 - **API_LICENSE_KEY** – single key, or **VALID_API_KEYS** – comma-separated keys
 - **ALLOWED_ORIGIN** – CORS origin (e.g. `http://localhost:3000` for draft kit)
 
+## Deploy to Vercel
+
+This repo is configured for Vercel using:
+
+- `api/index.js` as the serverless entrypoint
+- `vercel.json` rewrite to route all paths to the Express app
+
+Steps:
+
+1. Push this repo to GitHub.
+2. In Vercel: **Add New -> Project**, then import this repository.
+3. Keep defaults and deploy.
+4. In **Project Settings -> Environment Variables**, set:
+   - `API_LICENSE_KEY` (required)
+   - `ALLOWED_ORIGIN` (for MVP you can use `*`)
+5. Redeploy after adding env vars.
+6. Verify:
+   - `https://<your-vercel-domain>/health`
+7. Add custom domain:
+   - **Project Settings -> Domains** -> add `api.yourdomain.com`
+   - Create the DNS records Vercel shows at your registrar.
+
 ## Demo UI
 
 Open `http://localhost:4001` (or `/demo.html`) to use the small front end:
