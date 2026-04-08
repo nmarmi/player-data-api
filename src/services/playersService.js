@@ -43,13 +43,56 @@ const SORTABLE_FIELDS = new Set([
   'fpts',
 ]);
 
+function stringHash(input) {
+  let hash = 0;
+  const text = String(input || '');
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+}
+
+function toPositiveInt(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  const normalized = Math.floor(number);
+  return normalized > 0 ? normalized : null;
+}
+
+function parseMlbPersonId(value) {
+  const asNumber = toPositiveInt(value);
+  if (asNumber) return asNumber;
+  const match = String(value || '').match(/^mlb-(\d+)$/i);
+  return match ? toPositiveInt(match[1]) : null;
+}
+
+function inferMlbPersonId(player, index) {
+  return (
+    parseMlbPersonId(player.mlbPersonId) ||
+    parseMlbPersonId(player.playerId) ||
+    parseMlbPersonId(player.id) ||
+    ((stringHash(`${player.playerName || ''}|${player.team || ''}|${index}`) % 900000) + 100000)
+  );
+}
+
+function normalizePlayerRecord(player, index) {
+  const mlbPersonId = inferMlbPersonId(player, index);
+  const { id, ...rest } = player;
+  return {
+    ...rest,
+    mlbPersonId,
+    playerId: `mlb-${mlbPersonId}`,
+  };
+}
+
 function loadPlayers() {
+  let players = fallbackPlayers;
   try {
     if (fs.existsSync(playersPath)) {
-      return JSON.parse(fs.readFileSync(playersPath, 'utf8'));
+      players = JSON.parse(fs.readFileSync(playersPath, 'utf8'));
     }
   } catch (_) {}
-  return fallbackPlayers;
+  return players.map(normalizePlayerRecord);
 }
 
 function firstValue(value) {
@@ -158,9 +201,12 @@ function matchesSearch(player, search) {
   const name = String(player.playerName || '').toLowerCase();
   const team = String(player.team || '').toLowerCase();
   const position = String(player.position || '').toLowerCase();
-  const id = String(player.id || '').toLowerCase();
+  const playerId = String(player.playerId || '').toLowerCase();
   return (
-    name.includes(search) || team.includes(search) || position.includes(search) || id.includes(search)
+    name.includes(search) ||
+    team.includes(search) ||
+    position.includes(search) ||
+    playerId.includes(search)
   );
 }
 
