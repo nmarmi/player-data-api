@@ -1,7 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 
-const playersPath = path.join(__dirname, '..', '..', 'data', 'players.json');
+const playersSeedPath = path.join(__dirname, '..', '..', 'data', 'players.seed.json');
+const externalPlayersPath = process.env.PLAYERS_DATA_PATH
+  ? path.resolve(process.cwd(), process.env.PLAYERS_DATA_PATH)
+  : null;
 const fallbackPlayers = require('../../data/players');
 
 const DEFAULT_LIMIT = 50;
@@ -114,8 +117,14 @@ function inferMlbPersonId(player, index) {
     parseMlbPersonId(player.mlbPersonId) ||
     parseMlbPersonId(player.playerId) ||
     parseMlbPersonId(player.id) ||
-    ((stringHash(`${player.playerName || ''}|${player.team || ''}|${index}`) % 900000) + 100000)
+    ((stringHash(`${player.playerName || ''}|${player.mlbTeam || player.team || ''}|${index}`) % 900000) + 100000)
   );
+}
+
+function readPlayersFromPath(filePath) {
+  if (!filePath) return null;
+  if (!fs.existsSync(filePath)) return null;
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
 function normalizePlayerRecord(player, index) {
@@ -143,12 +152,11 @@ function normalizePlayerRecord(player, index) {
 }
 
 function loadPlayers() {
-  let players = fallbackPlayers;
+  let players = null;
   try {
-    if (fs.existsSync(playersPath)) {
-      players = JSON.parse(fs.readFileSync(playersPath, 'utf8'));
-    }
+    players = readPlayersFromPath(externalPlayersPath) || readPlayersFromPath(playersSeedPath);
   } catch (_) {}
+  if (!Array.isArray(players) || !players.length) players = fallbackPlayers;
   return players.map(normalizePlayerRecord);
 }
 

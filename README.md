@@ -24,13 +24,13 @@ Standalone **licensable** Player Data API for a fantasy baseball draft kit. Supp
 
 ## Player data from CSV
 
-The API uses **data/players.json** when present (otherwise a small fallback list in **data/players.js**). To load your own NL stats or projections:
+Canonical local seed data is **data/players.seed.json** (used by default when no external data source is configured). To generate an external dataset from your own NL stats or projections:
 
 ```bash
 node scripts/csv-to-players.js /path/to/your.csv
 ```
 
-Expected CSV columns: `Player,AB,R,H,1B,2B,3B,HR,RBI,BB,K,SB,CS,AVG,OBP,SLG,FPTS` plus optional `mlbPersonId` (`mlb_person_id`/`mlbamid` also accepted). The `Player` column should be like `"Name Position | TEAM"` (e.g. `Juan Soto OF | NYM`). Output is written to **data/players.json**; restart the API to pick it up.
+Expected CSV columns: `Player,AB,R,H,1B,2B,3B,HR,RBI,BB,K,SB,CS,AVG,OBP,SLG,FPTS` plus optional `mlbPersonId` (`mlb_person_id`/`mlbamid`) and optional `mlbTeamId` (`mlb_team_id`/`teamid`). The `Player` column should be like `"Name Position | TEAM"` (e.g. `Juan Soto OF | NYM`). Output is written to **data/players.json**.
 
 Example with your files:
 
@@ -51,6 +51,7 @@ npm start
 - **PORT** (default 4001)
 - **API_LICENSE_KEY** – single key, or **VALID_API_KEYS** – comma-separated keys
 - **ALLOWED_ORIGIN** – CORS origin (e.g. `http://localhost:3000` for draft kit)
+- **PLAYERS_DATA_PATH** – optional path to external player data JSON (e.g. `data/players.json`). If unset, the API loads `data/players.seed.json`.
 
 ## Deploy to Vercel
 
