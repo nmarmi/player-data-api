@@ -41,14 +41,34 @@ function parsePlayerField(raw) {
   return { playerName, position, team };
 }
 
-function slug(name) {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '');
+function stringHash(input) {
+  let hash = 0;
+  const text = String(input || '');
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash * 31 + text.charCodeAt(i)) >>> 0;
+  }
+  return hash;
 }
 
-function parseLine(line) {
+function toPositiveInt(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  const normalized = Math.floor(number);
+  return normalized > 0 ? normalized : null;
+}
+
+function buildMlbPersonId(rawId, playerName, team, rowIndex) {
+  const parsed = toPositiveInt(rawId);
+  if (parsed) return parsed;
+  return (stringHash(`${playerName}|${team}|${rowIndex}`) % 900000) + 100000;
+}
+
+function findColumnIndex(headerFields, names) {
+  const wanted = new Set(names.map((name) => name.toLowerCase()));
+  return headerFields.findIndex((name) => wanted.has(String(name).trim().toLowerCase()));
+}
+
+function parseLine(line, columns, rowIndex) {
   let playerRaw;
   let restStr;
   if (line.startsWith('"')) {
@@ -62,56 +82,78 @@ function parseLine(line) {
     playerRaw = line.slice(0, idx);
     restStr = line.slice(idx + 1);
   }
-  const rest = restStr.split(',').map((x) => x.trim());
-  if (rest.length < 16) return null;
-  const num = (i) => {
-    const v = rest[i];
+  const cells = restStr.split(',').map((x) => x.trim());
+  const cell = (index) => (index >= 0 ? cells[index] : '');
+  const num = (index) => {
+    const v = cell(index);
     if (v === '' || v == null) return 0;
     const n = parseFloat(v);
     return Number.isFinite(n) ? n : 0;
   };
   const { playerName, position, team } = parsePlayerField(playerRaw);
-  const id = slug(playerName) || 'p-' + Math.random().toString(36).slice(2, 9);
+  const mlbPersonId = buildMlbPersonId(cell(columns.mlbPersonId), playerName, team, rowIndex);
   return {
-    id,
+    mlbPersonId,
+    playerId: `mlb-${mlbPersonId}`,
     playerName,
     team,
     position,
-    ab: num(0),
-    r: num(1),
-    h: num(2),
-    hr: num(6),
-    rbi: num(7),
-    bb: num(8),
-    k: num(9),
-    sb: num(10),
-    avg: num(12),
-    obp: num(13),
-    slg: num(14),
-    fpts: num(15),
+    ab: num(columns.ab),
+    r: num(columns.r),
+    h: num(columns.h),
+    hr: num(columns.hr),
+    rbi: num(columns.rbi),
+    bb: num(columns.bb),
+    k: num(columns.k),
+    sb: num(columns.sb),
+    avg: num(columns.avg),
+    obp: num(columns.obp),
+    slg: num(columns.slg),
+    fpts: num(columns.fpts),
   };
 }
 
 const csv = fs.readFileSync(csvPath, 'utf8');
 const lines = csv.split(/\r?\n/).filter((l) => l.trim());
 const header = lines[0];
-if (!header.startsWith('Player')) {
-  console.error('Expected CSV header starting with Player. Got:', header.slice(0, 50));
+if (!header.toLowerCase().startsWith('player')) {
+  console.error('Expected CSV header starting with Player. Got:', header.slice(0, 80));
   process.exit(1);
 }
+const headerFields = header.split(',').map((value) => value.trim());
+const statHeaders = headerFields.slice(1);
+const columns = {
+  mlbPersonId: findColumnIndex(statHeaders, ['mlbPersonId', 'mlb_person_id', 'mlbamid']),
+  ab: findColumnIndex(statHeaders, ['ab']),
+  r: findColumnIndex(statHeaders, ['r']),
+  h: findColumnIndex(statHeaders, ['h']),
+  hr: findColumnIndex(statHeaders, ['hr']),
+  rbi: findColumnIndex(statHeaders, ['rbi']),
+  bb: findColumnIndex(statHeaders, ['bb']),
+  k: findColumnIndex(statHeaders, ['k']),
+  sb: findColumnIndex(statHeaders, ['sb']),
+  avg: findColumnIndex(statHeaders, ['avg']),
+  obp: findColumnIndex(statHeaders, ['obp']),
+  slg: findColumnIndex(statHeaders, ['slg']),
+  fpts: findColumnIndex(statHeaders, ['fpts']),
+};
+const required = ['ab', 'r', 'h', 'hr', 'rbi', 'bb', 'k', 'sb', 'avg', 'obp', 'slg', 'fpts'];
+const missing = required.filter((column) => columns[column] === -1);
+if (missing.length) {
+  console.error('Missing required CSV columns:', missing.join(', '));
+  process.exit(1);
+}
+
 const players = [];
 for (let i = 1; i < lines.length; i++) {
-  const row = parseLine(lines[i]);
+  const row = parseLine(lines[i], columns, i);
   if (row && row.playerName) players.push(row);
 }
-// Dedupe by id (same name)
+// Dedupe by playerId (mlb-{mlbPersonId})
 const seen = new Set();
-const unique = players.filter((p) => {
-  let id = p.id;
-  let n = 0;
-  while (seen.has(id)) id = p.id + '-' + (++n);
-  seen.add(id);
-  p.id = id;
+const unique = players.filter((player) => {
+  if (seen.has(player.playerId)) return false;
+  seen.add(player.playerId);
   return true;
 });
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
