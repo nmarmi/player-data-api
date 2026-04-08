@@ -13,6 +13,7 @@ Standalone **licensable** Player Data API for a fantasy baseball draft kit. Supp
 | POST   | /usage          | Push usage/event from app  | Yes              |
 
 - **License**: Send `X-API-Key: <key>` or `Authorization: Bearer <key>`.
+- **Player identity**: Every player includes `mlbPersonId` and `playerId` in the format `mlb-{mlbPersonId}`.
 - **GET /players** query params (optional):
   - Base filters: `search`, `team`, `position`
   - Numeric ranges: `minFpts`, `maxFpts`, `minHr`, `maxHr`, `minRbi`, `maxRbi`, `minAvg`, `maxAvg` (plus same pattern for `ab,r,h,bb,k,sb,obp,slg`)
@@ -28,7 +29,7 @@ The API uses **data/players.json** when present (otherwise a small fallback list
 node scripts/csv-to-players.js /path/to/your.csv
 ```
 
-Expected CSV columns: `Player,AB,R,H,1B,2B,3B,HR,RBI,BB,K,SB,CS,AVG,OBP,SLG,FPTS`. The `Player` column should be like `"Name Position | TEAM"` (e.g. `Juan Soto OF | NYM`). Output is written to **data/players.json**; restart the API to pick it up.
+Expected CSV columns: `Player,AB,R,H,1B,2B,3B,HR,RBI,BB,K,SB,CS,AVG,OBP,SLG,FPTS` plus optional `mlbPersonId` (`mlb_person_id`/`mlbamid` also accepted). The `Player` column should be like `"Name Position | TEAM"` (e.g. `Juan Soto OF | NYM`). Output is written to **data/players.json**; restart the API to pick it up.
 
 Example with your files:
 
