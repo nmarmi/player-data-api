@@ -26,7 +26,9 @@ const NUMERIC_FIELDS = new Set([
 ]);
 
 const SORTABLE_FIELDS = new Set([
+  'name',
   'playerName',
+  'positions',
   'mlbTeam',
   'mlbTeamId',
   'position',
@@ -120,13 +122,23 @@ function normalizePlayerRecord(player, index) {
   const mlbPersonId = inferMlbPersonId(player, index);
   const mlbTeam = String(player.mlbTeam || player.team || '').trim().toUpperCase();
   const teamId = parseMlbTeamId(player.mlbTeamId) || MLB_TEAM_IDS[mlbTeam] || null;
-  const { id, ...rest } = player;
+  const name = String(player.name || player.playerName || '').trim();
+  const positions = normalizePositions(player, name);
+  const status = String(player.status || 'active').trim().toLowerCase() || 'active';
+  const isAvailable = parseAvailability(player.isAvailable);
+  const { id, team, ...rest } = player;
   return {
     ...rest,
+    name,
+    playerName: name,
+    positions,
+    position: positions.join(','),
     mlbTeam,
     mlbTeamId: teamId ? `mlb-${teamId}` : null,
     mlbPersonId,
     playerId: `mlb-${mlbPersonId}`,
+    status,
+    isAvailable,
   };
 }
 
@@ -187,10 +199,31 @@ function parseSortOrder(value) {
 
 function toPositionTokens(value) {
   if (!value) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => String(v).trim().toUpperCase())
+      .filter(Boolean);
+  }
   return String(value)
     .split(',')
     .map((v) => v.trim().toUpperCase())
     .filter(Boolean);
+}
+
+function normalizePositions(player, name) {
+  const tokens = toPositionTokens(player.positions || player.position);
+  if (tokens.length) return [...new Set(tokens)];
+  return fallbackPositionsFromName(name || player.playerName);
+}
+
+function parseAvailability(value) {
+  if (value === undefined || value === null || value === '') return true;
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value !== 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (['false', '0', 'no', 'n'].includes(normalized)) return false;
+  if (['true', '1', 'yes', 'y'].includes(normalized)) return true;
+  return Boolean(normalized);
 }
 
 function fallbackPositionsFromName(playerName) {
@@ -201,9 +234,9 @@ function fallbackPositionsFromName(playerName) {
 }
 
 function playerPositionTokens(player) {
-  const tokens = toPositionTokens(player.position);
+  const tokens = toPositionTokens(player.positions || player.position);
   if (tokens.length) return tokens;
-  return fallbackPositionsFromName(player.playerName);
+  return fallbackPositionsFromName(player.name || player.playerName);
 }
 
 function buildNumericRanges(query) {
@@ -243,10 +276,10 @@ function buildPlayersQuery(query = {}) {
 
 function matchesSearch(player, search) {
   if (!search) return true;
-  const name = String(player.playerName || '').toLowerCase();
+  const name = String(player.name || player.playerName || '').toLowerCase();
   const team = String(player.mlbTeam || '').toLowerCase();
   const teamId = String(player.mlbTeamId || '').toLowerCase();
-  const position = String(player.position || '').toLowerCase();
+  const position = String((player.positions || []).join(',') || player.position || '').toLowerCase();
   const playerId = String(player.playerId || '').toLowerCase();
   return (
     name.includes(search) ||
@@ -279,8 +312,8 @@ function matchesRanges(player, ranges) {
 }
 
 function comparePlayers(left, right, sortBy, direction) {
-  const leftValue = left[sortBy];
-  const rightValue = right[sortBy];
+  const leftValue = sortBy === 'positions' ? (left.positions || []).join(',') : left[sortBy];
+  const rightValue = sortBy === 'positions' ? (right.positions || []).join(',') : right[sortBy];
   const leftNumber = Number(leftValue);
   const rightNumber = Number(rightValue);
 
@@ -292,7 +325,9 @@ function comparePlayers(left, right, sortBy, direction) {
   }
 
   if (compare === 0) {
-    compare = String(left.playerName || '').localeCompare(String(right.playerName || ''));
+    compare = String(left.name || left.playerName || '').localeCompare(
+      String(right.name || right.playerName || '')
+    );
   }
   return compare * direction;
 }
