@@ -14,6 +14,7 @@ Standalone **licensable** Player Data API for a fantasy baseball draft kit. Supp
 
 - **License**: Send `X-API-Key: <key>` or `Authorization: Bearer <key>`.
 - **Player identity**: Every player includes `mlbPersonId` and `playerId` in the format `mlb-{mlbPersonId}`.
+- **MLB team identity**: Every player includes `mlbTeamId` in the format `mlb-{mlbTeamId}` and `mlbTeam` as the team abbreviation (e.g., `LAD`).
 - **GET /players** query params (optional):
   - Base filters: `search`, `team`, `position`
   - Numeric ranges: `minFpts`, `maxFpts`, `minHr`, `maxHr`, `minRbi`, `maxRbi`, `minAvg`, `maxAvg` (plus same pattern for `ab,r,h,bb,k,sb,obp,slg`)

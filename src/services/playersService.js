@@ -27,7 +27,8 @@ const NUMERIC_FIELDS = new Set([
 
 const SORTABLE_FIELDS = new Set([
   'playerName',
-  'team',
+  'mlbTeam',
+  'mlbTeamId',
   'position',
   'ab',
   'r',
@@ -42,6 +43,39 @@ const SORTABLE_FIELDS = new Set([
   'slg',
   'fpts',
 ]);
+
+const MLB_TEAM_IDS = {
+  ARI: 109,
+  ATL: 144,
+  BAL: 110,
+  BOS: 111,
+  CHC: 112,
+  CIN: 113,
+  CLE: 114,
+  COL: 115,
+  CWS: 145,
+  DET: 116,
+  HOU: 117,
+  KC: 118,
+  LAA: 108,
+  LAD: 119,
+  MIA: 146,
+  MIL: 158,
+  MIN: 142,
+  NYM: 121,
+  NYY: 147,
+  OAK: 133,
+  PHI: 143,
+  PIT: 134,
+  SD: 135,
+  SEA: 136,
+  SF: 137,
+  STL: 138,
+  TB: 139,
+  TEX: 140,
+  TOR: 141,
+  WAS: 120,
+};
 
 function stringHash(input) {
   let hash = 0;
@@ -66,6 +100,13 @@ function parseMlbPersonId(value) {
   return match ? toPositiveInt(match[1]) : null;
 }
 
+function parseMlbTeamId(value) {
+  const asNumber = toPositiveInt(value);
+  if (asNumber) return asNumber;
+  const match = String(value || '').match(/^mlb-(\d+)$/i);
+  return match ? toPositiveInt(match[1]) : null;
+}
+
 function inferMlbPersonId(player, index) {
   return (
     parseMlbPersonId(player.mlbPersonId) ||
@@ -77,9 +118,13 @@ function inferMlbPersonId(player, index) {
 
 function normalizePlayerRecord(player, index) {
   const mlbPersonId = inferMlbPersonId(player, index);
+  const mlbTeam = String(player.mlbTeam || player.team || '').trim().toUpperCase();
+  const teamId = parseMlbTeamId(player.mlbTeamId) || MLB_TEAM_IDS[mlbTeam] || null;
   const { id, ...rest } = player;
   return {
     ...rest,
+    mlbTeam,
+    mlbTeamId: teamId ? `mlb-${teamId}` : null,
     mlbPersonId,
     playerId: `mlb-${mlbPersonId}`,
   };
@@ -199,12 +244,14 @@ function buildPlayersQuery(query = {}) {
 function matchesSearch(player, search) {
   if (!search) return true;
   const name = String(player.playerName || '').toLowerCase();
-  const team = String(player.team || '').toLowerCase();
+  const team = String(player.mlbTeam || '').toLowerCase();
+  const teamId = String(player.mlbTeamId || '').toLowerCase();
   const position = String(player.position || '').toLowerCase();
   const playerId = String(player.playerId || '').toLowerCase();
   return (
     name.includes(search) ||
     team.includes(search) ||
+    teamId.includes(search) ||
     position.includes(search) ||
     playerId.includes(search)
   );
@@ -212,7 +259,7 @@ function matchesSearch(player, search) {
 
 function matchesTeam(player, teams) {
   if (!teams.length) return true;
-  return teams.includes(String(player.team || '').toUpperCase());
+  return teams.includes(String(player.mlbTeam || '').toUpperCase());
 }
 
 function matchesPosition(player, positions) {
@@ -279,7 +326,7 @@ function applyPlayersQuery(players, query) {
 }
 
 function getPlayerFilterOptions(players) {
-  const teams = [...new Set(players.map((player) => String(player.team || '').trim().toUpperCase()))]
+  const teams = [...new Set(players.map((player) => String(player.mlbTeam || '').trim().toUpperCase()))]
     .filter(Boolean)
     .sort();
 

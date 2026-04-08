@@ -13,6 +13,39 @@ const path = require('path');
 const csvPath = process.argv[2] || path.join(__dirname, '..', 'data', '2025-player-NL-stats.csv');
 const outPath = path.join(__dirname, '..', 'data', 'players.json');
 
+const MLB_TEAM_IDS = {
+  ARI: 109,
+  ATL: 144,
+  BAL: 110,
+  BOS: 111,
+  CHC: 112,
+  CIN: 113,
+  CLE: 114,
+  COL: 115,
+  CWS: 145,
+  DET: 116,
+  HOU: 117,
+  KC: 118,
+  LAA: 108,
+  LAD: 119,
+  MIA: 146,
+  MIL: 158,
+  MIN: 142,
+  NYM: 121,
+  NYY: 147,
+  OAK: 133,
+  PHI: 143,
+  PIT: 134,
+  SD: 135,
+  SEA: 136,
+  SF: 137,
+  STL: 138,
+  TB: 139,
+  TEX: 140,
+  TOR: 141,
+  WAS: 120,
+};
+
 function parsePlayerField(raw) {
   // "Juan Soto OF | NYM" or "Shohei Ohtani U,P | LAD " -> name, position, team
   const s = raw.trim();
@@ -63,6 +96,13 @@ function buildMlbPersonId(rawId, playerName, team, rowIndex) {
   return (stringHash(`${playerName}|${team}|${rowIndex}`) % 900000) + 100000;
 }
 
+function parseMlbTeamId(value) {
+  const parsed = toPositiveInt(value);
+  if (parsed) return parsed;
+  const match = String(value || '').match(/^mlb-(\d+)$/i);
+  return match ? toPositiveInt(match[1]) : null;
+}
+
 function findColumnIndex(headerFields, names) {
   const wanted = new Set(names.map((name) => name.toLowerCase()));
   return headerFields.findIndex((name) => wanted.has(String(name).trim().toLowerCase()));
@@ -91,12 +131,15 @@ function parseLine(line, columns, rowIndex) {
     return Number.isFinite(n) ? n : 0;
   };
   const { playerName, position, team } = parsePlayerField(playerRaw);
+  const mlbTeam = team.toUpperCase();
+  const teamId = parseMlbTeamId(cell(columns.mlbTeamId)) || MLB_TEAM_IDS[mlbTeam] || null;
   const mlbPersonId = buildMlbPersonId(cell(columns.mlbPersonId), playerName, team, rowIndex);
   return {
     mlbPersonId,
     playerId: `mlb-${mlbPersonId}`,
+    mlbTeam,
+    mlbTeamId: teamId ? `mlb-${teamId}` : null,
     playerName,
-    team,
     position,
     ab: num(columns.ab),
     r: num(columns.r),
@@ -124,6 +167,7 @@ const headerFields = header.split(',').map((value) => value.trim());
 const statHeaders = headerFields.slice(1);
 const columns = {
   mlbPersonId: findColumnIndex(statHeaders, ['mlbPersonId', 'mlb_person_id', 'mlbamid']),
+  mlbTeamId: findColumnIndex(statHeaders, ['mlbTeamId', 'mlb_team_id', 'teamid', 'team_id']),
   ab: findColumnIndex(statHeaders, ['ab']),
   r: findColumnIndex(statHeaders, ['r']),
   h: findColumnIndex(statHeaders, ['h']),
