@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "import-csv": "node scripts/csv-to-players.js"
+    "import-csv": "node scripts/csv-to-players.js",
+    "import-mlb": "node scripts/fetch-mlb-data.js"
   },
   "engines": {
     "node": ">=18"

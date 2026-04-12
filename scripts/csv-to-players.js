@@ -12,6 +12,7 @@ const path = require('path');
 
 const csvPath = process.argv[2] || path.join(__dirname, '..', 'data', '2025-player-NL-stats.csv');
 const outPath = path.join(__dirname, '..', 'data', 'players.json');
+const KNOWN_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'OF', 'DH', 'P', 'U'];
 
 const MLB_TEAM_IDS = {
   ARI: 109,
@@ -108,17 +109,39 @@ function findColumnIndex(headerFields, names) {
   return headerFields.findIndex((name) => wanted.has(String(name).trim().toLowerCase()));
 }
 
+function tokenizePositions(value) {
+  if (!value) return [];
+  const tokens = String(value)
+    .split(',')
+    .map((token) => token.trim().toUpperCase())
+    .filter(Boolean);
+  return [...new Set(tokens)];
+}
+
+function fallbackPositionsFromName(playerName) {
+  if (!playerName) return [];
+  const upper = String(playerName).toUpperCase();
+  const matches = upper.match(/\b(C|1B|2B|3B|SS|OF|DH|P|U)\b/g) || [];
+  return [...new Set(matches)];
+}
+
+function normalizePositions(rawPosition, playerName) {
+  const tokens = tokenizePositions(rawPosition).filter((token) => KNOWN_POSITIONS.includes(token));
+  if (tokens.length) return tokens;
+  return fallbackPositionsFromName(playerName).filter((token) => KNOWN_POSITIONS.includes(token));
+}
+
 function parseLine(line, columns, rowIndex) {
   let playerRaw;
   let restStr;
   if (line.startsWith('"')) {
     const end = line.indexOf('",');
-    if (end === -1) return null;
+    if (end === -1) return { error: 'Malformed quoted Player field' };
     playerRaw = line.slice(1, end).replace(/""/g, '"');
     restStr = line.slice(end + 2);
   } else {
     const idx = line.indexOf(',');
-    if (idx === -1) return null;
+    if (idx === -1) return { error: 'Missing CSV delimiter' };
     playerRaw = line.slice(0, idx);
     restStr = line.slice(idx + 1);
   }
@@ -134,13 +157,19 @@ function parseLine(line, columns, rowIndex) {
   const mlbTeam = team.toUpperCase();
   const teamId = parseMlbTeamId(cell(columns.mlbTeamId)) || MLB_TEAM_IDS[mlbTeam] || null;
   const mlbPersonId = buildMlbPersonId(cell(columns.mlbPersonId), playerName, team, rowIndex);
-  return {
+  const positions = normalizePositions(position, playerName);
+  const player = {
+    _sourceRow: rowIndex + 1,
     mlbPersonId,
     playerId: `mlb-${mlbPersonId}`,
+    name: playerName,
     mlbTeam,
     mlbTeamId: teamId ? `mlb-${teamId}` : null,
+    status: 'active',
+    isAvailable: true,
+    positions,
     playerName,
-    position,
+    position: positions.join(','),
     ab: num(columns.ab),
     r: num(columns.r),
     h: num(columns.h),
@@ -154,6 +183,11 @@ function parseLine(line, columns, rowIndex) {
     slg: num(columns.slg),
     fpts: num(columns.fpts),
   };
+  if (!player.name) return { error: 'Missing player name' };
+  if (!player.mlbTeam) return { error: 'Missing MLB team abbreviation' };
+  if (!player.positions.length) return { error: 'Missing/invalid positions' };
+  if (!player.mlbTeamId) return { error: `Unknown MLB team "${player.mlbTeam}"` };
+  return { player };
 }
 
 const csv = fs.readFileSync(csvPath, 'utf8');
@@ -189,17 +223,36 @@ if (missing.length) {
 }
 
 const players = [];
+const skippedRows = [];
 for (let i = 1; i < lines.length; i++) {
-  const row = parseLine(lines[i], columns, i);
-  if (row && row.playerName) players.push(row);
+  const parsed = parseLine(lines[i], columns, i);
+  if (parsed.player) {
+    players.push(parsed.player);
+  } else {
+    skippedRows.push({ row: i + 1, reason: parsed.error || 'Unknown parse error' });
+  }
 }
 // Dedupe by playerId (mlb-{mlbPersonId})
 const seen = new Set();
+let duplicateCount = 0;
 const unique = players.filter((player) => {
-  if (seen.has(player.playerId)) return false;
+  if (seen.has(player.playerId)) {
+    duplicateCount += 1;
+    skippedRows.push({ row: player._sourceRow, reason: `Duplicate playerId ${player.playerId}` });
+    return false;
+  }
   seen.add(player.playerId);
   return true;
-});
+}).map(({ _sourceRow, ...player }) => player);
 fs.mkdirSync(path.dirname(outPath), { recursive: true });
 fs.writeFileSync(outPath, JSON.stringify(unique, null, 0), 'utf8');
+console.log(
+  `Processed ${lines.length - 1} rows. Imported ${unique.length}. Skipped ${skippedRows.length}. Duplicates ${duplicateCount}.`
+);
+if (skippedRows.length) {
+  console.warn('Skipped row details (first 20):');
+  skippedRows.slice(0, 20).forEach((entry) => {
+    console.warn(`  row ${entry.row}: ${entry.reason}`);
+  });
+}
 console.log('Wrote', unique.length, 'players to', outPath);

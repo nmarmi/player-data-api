@@ -24,13 +24,38 @@ Standalone **licensable** Player Data API for a fantasy baseball draft kit. Supp
 
 ## Player data from CSV
 
-Canonical local seed data is **data/players.seed.json** (used by default when no external data source is configured). To generate an external dataset from your own NL stats or projections:
+The API uses **data/players.json** as the local player data source by default. To generate/update this dataset from your own NL stats or projections:
 
 ```bash
 node scripts/csv-to-players.js /path/to/your.csv
 ```
 
 Expected CSV columns: `Player,AB,R,H,1B,2B,3B,HR,RBI,BB,K,SB,CS,AVG,OBP,SLG,FPTS` plus optional `mlbPersonId` (`mlb_person_id`/`mlbamid`) and optional `mlbTeamId` (`mlb_team_id`/`teamid`). The `Player` column should be like `"Name Position | TEAM"` (e.g. `Juan Soto OF | NYM`). Output is written to **data/players.json**.
+The importer now emits PlayerStub-compatible fields (`playerId`, `name`, `positions[]`, `mlbTeam`, `status`, `isAvailable`) and prints skipped-row reasons for invalid records.
+
+### Pull data from balldontlie MLB API
+
+To generate `data/players.json` from [mlb.balldontlie.io](https://mlb.balldontlie.io/), run:
+
+```bash
+npm run import-mlb
+```
+
+Set your balldontlie API key first:
+
+```bash
+export BALLDONTLIE_API_KEY=your_api_key_here
+```
+
+Optional flags:
+
+```bash
+node scripts/fetch-mlb-data.js --season=2026 --out=data/players.json --per-page=100
+node scripts/fetch-mlb-data.js --max-players=300
+```
+
+This importer pulls active players, injuries (if your plan includes that endpoint), and season stats (if your plan includes that endpoint), then writes PlayerStub-compatible records with stats included.
+For free-tier keys, keep `--max-players` low (e.g. 300-400) to avoid frequent 429 rate-limit errors.
 
 Example with your files:
 
@@ -51,7 +76,7 @@ npm start
 - **PORT** (default 4001)
 - **API_LICENSE_KEY** – single key, or **VALID_API_KEYS** – comma-separated keys
 - **ALLOWED_ORIGIN** – CORS origin (e.g. `http://localhost:3000` for draft kit)
-- **PLAYERS_DATA_PATH** – optional path to external player data JSON (e.g. `data/players.json`). If unset, the API loads `data/players.seed.json`.
+- **PLAYERS_DATA_PATH** – optional override path to player data JSON (default is `data/players.json`).
 
 ## Deploy to Vercel
 
