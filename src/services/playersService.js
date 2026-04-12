@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const playersSeedPath = path.join(__dirname, '..', '..', 'data', 'players.seed.json');
+const playersDataPath = path.join(__dirname, '..', '..', 'data', 'players.json');
 const externalPlayersPath = process.env.PLAYERS_DATA_PATH
   ? path.resolve(process.cwd(), process.env.PLAYERS_DATA_PATH)
   : null;
@@ -154,7 +154,7 @@ function normalizePlayerRecord(player, index) {
 function loadPlayers() {
   let players = null;
   try {
-    players = readPlayersFromPath(externalPlayersPath) || readPlayersFromPath(playersSeedPath);
+    players = readPlayersFromPath(externalPlayersPath) || readPlayersFromPath(playersDataPath);
   } catch (_) {}
   if (!Array.isArray(players) || !players.length) players = fallbackPlayers;
   return players.map(normalizePlayerRecord);
