@@ -33,8 +33,9 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Foundation for quality and deployability.
 
 ### Phase 6: External MLB Data Ingestion (Milestone 4)
-- US-4.1, US-4.2, US-4.3, US-4.4, US-4.5, US-4.6, US-4.7
+- US-4.1, US-4.2, US-4.3, US-4.4, US-4.5, US-4.6, US-4.7, US-4.8
 - Brings in real baseball data to replace seed data.
+- Uses the free MLB Stats API (`statsapi.mlb.com`) — no API key required.
 
 ### Phase 7: Valuation Engine (Milestone 5)
 - US-5.1, US-5.2, US-5.3, US-5.4, US-5.5
@@ -207,51 +208,65 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 
 ## Epic 4: External MLB Data Ingestion (Milestone 4)
 
-### US-4.1: Player metadata ingestion from MLB source
-**As a** system, **I want** to sync player identity data from an external MLB data source, **so that** the player pool is accurate and complete.
+> **Data source:** The free, unauthenticated MLB Stats API at `statsapi.mlb.com/api/v1`.
+> No API key is required. All ingestion jobs call this public API directly.
+> The previously used balldontlie API (which gated injuries, depth charts, and
+> transactions behind paid tiers) is replaced entirely.
+
+### US-4.1: Player metadata ingestion from MLB Stats API
+**As a** system, **I want** to sync player identity data from the free MLB Stats API, **so that** the player pool is accurate, complete, and costs nothing to maintain.
 
 **Acceptance criteria:**
-- Ingestion job fetches player rosters from an MLB data source (e.g., MLB Stats API)
-- Each player is stored/updated with: `playerId` (mlb-format), `name`, `positions`, `mlbTeam`, `status`
-- Job is idempotent
+- Ingestion job fetches all active MLB players via `GET /api/v1/sports/1/players?season={year}` (sportId 1 = MLB)
+- Alternatively, iterates all 30 teams using `GET /api/v1/teams/{teamId}/roster?rosterType=40Man&hydrate=person` to capture the 40-man roster with player detail
+- Each player is stored/updated with: `playerId` (mlb-format using the `person.id` from the API), `name`, `positions`, `mlbTeam`, `status`
+- No API key or authorization header is required
+- Job is idempotent — safe to re-run without duplicating data
 - Job logs results: players added, updated, unchanged
 - Refresh policy: once per season or on manual trigger
 
-### US-4.2: Injury status ingestion
-**As a** Draft Kit user, **I want** current injury information reflected in the player pool.
+### US-4.2: Injury status ingestion via roster hydration
+**As a** Draft Kit user, **I want** current injury information reflected in the player pool, **sourced from the free MLB Stats API**.
 
 **Acceptance criteria:**
-- Ingestion job fetches current injury reports
+- Ingestion job iterates all 30 teams and fetches `GET /api/v1/teams/{teamId}/roster?rosterType=active&hydrate=person(injuries)` to obtain injury data embedded in roster responses
+- As a supplementary source, fetches recent IL-related transactions via `GET /api/v1/transactions?startDate={7daysAgo}&endDate={today}` and filters for transaction types containing "Injured List", "Disabled List", or "Paternity List"
 - Player `status` field updates to reflect injury state (e.g., `"IL-10"`, `"IL-60"`, `"DTD"`)
+- No API key is required — the MLB Stats API hydration parameter provides injury data on the free tier
 - Refresh policy: every 15–60 minutes during active use, with manual refresh option
 - Stale data is indicated in API response (e.g., `lastUpdated` timestamp)
 
-### US-4.3: Depth chart ingestion
+### US-4.3: Depth chart ingestion from MLB Stats API
 **As a** Draft Kit user, **I want** depth chart context available for players, **so that** I can assess playing time before bidding.
 
 **Acceptance criteria:**
-- Ingestion job fetches depth chart data
-- Player records include depth chart position or role indicator
+- Ingestion job iterates all 30 teams and fetches `GET /api/v1/teams/{teamId}/roster?rosterType=depthChart`
+- The response includes players grouped by position with an implicit ordering (first listed = starter)
+- Player records include a `depthChartRank` (1 = starter, 2 = backup, etc.) and `depthChartPosition` field
 - Refresh policy: every 6–12 hours
-- Data is normalized into a consistent format
+- Data is normalized into a consistent format across all teams
+- No API key is required
 
-### US-4.4: Transaction/roster status ingestion
-**As a** Draft Kit user, **I want** recent transactions (call-ups, send-downs, DFA, trades) reflected.
+### US-4.4: Transaction/roster status ingestion from MLB Stats API
+**As a** Draft Kit user, **I want** recent transactions (call-ups, send-downs, DFA, trades) reflected in the player pool.
 
 **Acceptance criteria:**
-- Ingestion job fetches recent MLB transactions
-- Player `status` and `mlbTeam` update when transactions occur
+- Ingestion job fetches `GET /api/v1/transactions?startDate={lookback}&endDate={today}` (lookback defaults to 7 days)
+- Filters transactions by relevant types: trades, call-ups/optioned, DFA, released, IL placements/activations
+- Player `status` and `mlbTeam` update when transactions are detected
 - Refresh policy: every 6–12 hours
-- Transaction history is optionally stored for context
+- Transaction history is optionally stored in a `transactions` table for context and audit
+- No API key is required
 
 ### US-4.5: Manual refresh trigger endpoint
 **As a** Draft Kit user, **I want** to trigger a data refresh on demand.
 
 **Acceptance criteria:**
-- `POST /admin/refresh` triggers a full data sync
-- Accepts optional `source` parameter to refresh specific data
+- `POST /admin/refresh` triggers a full data sync against the MLB Stats API
+- Accepts optional `source` parameter to refresh specific data (e.g., `player_metadata`, `injuries`, `depth_charts`, `transactions`)
 - Returns sync results: `{ success: true, sources: [{ source, recordsUpdated, duration }] }`
 - Protected by admin-level auth
+- Since the MLB Stats API has no auth requirement, refreshes should always succeed (barring network issues)
 
 ### US-4.6: Scheduled ingestion jobs
 **As a** system, **I want** data syncs to run on a schedule without manual intervention.
@@ -262,6 +277,7 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Frequently changing data (injuries) syncs every 15–60 minutes during configured active hours
 - Jobs are idempotent and safe to run concurrently
 - Job failures are logged and do not crash the application
+- Rate limiting note: the MLB Stats API is free but undocumented on rate limits; jobs should include polite pacing (200–500ms between requests) and back off on HTTP 429
 
 ### US-4.7: Data freshness indicators in API responses
 **As a** Draft Kit developer, **I want** API responses to include data freshness metadata.
@@ -270,6 +286,17 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Player list and detail responses include `dataAsOf` timestamp
 - Valuation responses include `dataAsOf` for both player data and draft state
 - If any data source is stale beyond its threshold, response includes `staleWarnings` array
+
+### US-4.8: Season stats ingestion for valuation baseline
+**As a** valuation engine (Epic 5), **I want** historical season stats available per player, **so that** dollar-value projections have real data to work from.
+
+**Acceptance criteria:**
+- Ingestion job fetches hitting stats via `GET /api/v1/stats?stats=season&group=hitting&season={prevYear}&sportIds=1&limit=500&offset=0` (paginated)
+- Fetches pitching stats via the same endpoint with `group=pitching`
+- Stats are stored in a `player_stats` table keyed by `(player_id, season, stat_group)`
+- Key columns: `ab`, `r`, `h`, `hr`, `rbi`, `bb`, `k`, `sb`, `avg`, `obp`, `slg` (hitting); `w`, `l`, `era`, `whip`, `k9`, `ip`, `sv` (pitching)
+- Refresh policy: once per season (stats from completed seasons are immutable)
+- No API key is required
 
 ---
 
@@ -457,12 +484,12 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 
 ## Data Refresh Policy Reference
 
-| Data Type | Refresh Frequency | Examples |
-|-----------|-------------------|----------|
-| Static | Once per season / manual | Player identity, historical stats, team identity |
-| Daily-changing | Every 6–12 hours | Depth charts, transactions, roster status |
-| Frequently changing | Every 15–60 min (active use) | Injuries, call-ups, role changes |
-| Draft state | Not polled — owned by Draft Kit | Purchases, budgets, availability |
+| Data Type | Refresh Frequency | MLB Stats API Source | Examples |
+|-----------|-------------------|---------------------|----------|
+| Static | Once per season / manual | `/sports/1/players`, `/teams/{id}/roster`, `/stats` | Player identity, season stats, team identity |
+| Daily-changing | Every 6–12 hours | `/teams/{id}/roster?rosterType=depthChart`, `/transactions` | Depth charts, transactions, roster status |
+| Frequently changing | Every 15–60 min (active use) | `/teams/{id}/roster?hydrate=person(injuries)`, `/transactions` | Injuries, IL moves, role changes |
+| Draft state | Not polled — owned by Draft Kit | N/A | Purchases, budgets, availability |
 
 ---
 
@@ -482,6 +509,6 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 |----------|---------|-----------|
 | Must do now | 1.1–1.5, 2.1–2.3, 2.6–2.7, 9.1–9.3 | 1 |
 | Next | 2.4–2.5, 3.1–3.4, 7.1–7.2, 7.4, 8.1 | 2–3 |
-| Then | 4.1–4.7, 8.2, 8.4 | 4 |
+| Then | 4.1–4.8, 8.2, 8.4 | 4 |
 | Later | 5.1–5.5, 6.1–6.4, 7.3, 7.5, 8.3 | 5 |
-| **Total** | **39 stories** | |
+| **Total** | **40 stories** | |

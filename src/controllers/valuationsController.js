@@ -15,20 +15,16 @@ function computeValuations(players, budget, rosterSlots) {
     return (a.name || '').localeCompare(b.name || '');
   });
 
-  // Only value the top N players (one per roster slot), rest get $1
+  // Distribute the full budget among the top N (one per roster slot); rest get $1
   const valuedCount = Math.min(sorted.length, rosterSlots);
-  // Sum of weights 1..valuedCount for proportional distribution
   const weightSum = (valuedCount * (valuedCount + 1)) / 2;
-  // Reserve $1 per remaining player so the total budget is realistic
-  const reservedForRest = Math.max(0, sorted.length - valuedCount);
-  const distributable = Math.max(0, budget - reservedForRest);
 
   return sorted.map((player, i) => {
     const rank = i + 1;
     let dollarValue;
     if (rank <= valuedCount) {
       const weight = valuedCount - rank + 1;
-      dollarValue = Math.max(1, Math.round((weight / weightSum) * distributable));
+      dollarValue = Math.max(1, Math.round((weight / weightSum) * budget));
     } else {
       dollarValue = 1;
     }
@@ -38,6 +34,21 @@ function computeValuations(players, budget, rosterSlots) {
 
 function getValuations(req, res) {
   const { leagueSettings = {}, draftState = {} } = req.body || {};
+
+  const validationErrors = [];
+  if (leagueSettings.budget !== undefined && (isNaN(Number(leagueSettings.budget)) || Number(leagueSettings.budget) <= 0)) {
+    validationErrors.push({ field: 'leagueSettings.budget', message: 'Must be a positive number' });
+  }
+  if (leagueSettings.rosterSlots !== undefined && (isNaN(Number(leagueSettings.rosterSlots)) || Number(leagueSettings.rosterSlots) <= 0)) {
+    validationErrors.push({ field: 'leagueSettings.rosterSlots', message: 'Must be a positive number' });
+  }
+  if (draftState.availablePlayerIds !== undefined && !Array.isArray(draftState.availablePlayerIds)) {
+    validationErrors.push({ field: 'draftState.availablePlayerIds', message: 'Must be an array' });
+  }
+  if (validationErrors.length) {
+    return res.status(400).json({ success: false, error: 'Invalid request body', code: 'BAD_REQUEST', fields: validationErrors });
+  }
+
   const budget = Number(leagueSettings.budget) || DEFAULT_BUDGET;
   const rosterSlots = Number(leagueSettings.rosterSlots) || DEFAULT_ROSTER_SLOTS;
   const { availablePlayerIds } = draftState;
@@ -53,4 +64,4 @@ function getValuations(req, res) {
   res.json({ success: true, valuations });
 }
 
-module.exports = { getValuations };
+module.exports = { getValuations, computeValuations };

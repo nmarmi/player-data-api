@@ -7,6 +7,43 @@ const externalPlayersPath = process.env.PLAYERS_DATA_PATH
   : null;
 const fallbackPlayers = require('../../data/players');
 
+let _getDb = null;
+function tryGetDb() {
+  if (!_getDb) {
+    try { _getDb = require('../db/connection').getDb; } catch (_) {}
+  }
+  try { return _getDb ? _getDb() : null; } catch (_) { return null; }
+}
+
+/** Convert a DB row back to the camelCase PlayerStub shape. */
+function rowToPlayer(row) {
+  return {
+    playerId:    row.player_id,
+    mlbPersonId: row.mlb_person_id,
+    name:        row.name,
+    playerName:  row.player_name,
+    positions:   JSON.parse(row.positions || '[]'),
+    position:    row.position,
+    mlbTeam:     row.mlb_team,
+    mlbTeamId:   row.mlb_team_id,
+    status:      row.status,
+    isAvailable: row.is_available === 1,
+    ab: row.ab, r: row.r,   h: row.h,   hr: row.hr,
+    rbi: row.rbi, bb: row.bb, k: row.k, sb: row.sb,
+    avg: row.avg, obp: row.obp, slg: row.slg, fpts: row.fpts,
+  };
+}
+
+function loadPlayersFromDb() {
+  const db = tryGetDb();
+  if (!db) return null;
+  try {
+    const rows = db.prepare('SELECT * FROM players').all();
+    if (!rows.length) return null;
+    return rows.map(rowToPlayer);
+  } catch (_) { return null; }
+}
+
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 200;
 const DEFAULT_SORT_BY = 'fpts';
@@ -152,6 +189,10 @@ function normalizePlayerRecord(player, index) {
 }
 
 function loadPlayers() {
+  // US-3.3: prefer database; fall back to JSON if DB unavailable or empty
+  const dbPlayers = loadPlayersFromDb();
+  if (dbPlayers) return dbPlayers;
+
   let players = null;
   try {
     players = readPlayersFromPath(externalPlayersPath) || readPlayersFromPath(playersDataPath);
