@@ -6,23 +6,24 @@ const {
   parseListParam,
 } = require('../services/playersService');
 
-let _getSyncStatus = null;
-function getInjuriesLastUpdated() {
-  if (!_getSyncStatus) {
-    try { _getSyncStatus = require('../db/syncLog').getSyncStatus; } catch (_) {}
+// US-4.7: lazily loaded to avoid crashing when DB is unavailable
+let _getDataFreshnessMeta = null;
+function freshness(sources) {
+  if (!_getDataFreshnessMeta) {
+    try { _getDataFreshnessMeta = require('../db/syncLog').getDataFreshnessMeta; } catch (_) {}
   }
-  try {
-    if (!_getSyncStatus) return null;
-    const row = _getSyncStatus().find((s) => s.source === 'injuries');
-    return row ? { lastSyncAt: row.lastSyncAt, isStale: row.isStale } : null;
-  } catch (_) { return null; }
+  if (!_getDataFreshnessMeta) return {};
+  return _getDataFreshnessMeta(sources);
 }
+
+// Sources that influence the player list / pool / detail responses
+const PLAYER_SOURCES = ['player_metadata', 'injuries', 'depth_charts', 'transactions'];
 
 function listPlayers(req, res) {
   const players = loadPlayers();
-  const query = buildPlayersQuery(req.query || {});
-  const result = applyPlayersQuery(players, query);
-  res.json({ success: true, ...result, injuries: getInjuriesLastUpdated() });
+  const query   = buildPlayersQuery(req.query || {});
+  const result  = applyPlayersQuery(players, query);
+  res.json({ success: true, ...result, ...freshness(PLAYER_SOURCES) });
 }
 
 function getPlayerFilters(_req, res) {
@@ -38,11 +39,11 @@ function getPlayerById(req, res) {
   if (!player) {
     return res.status(404).json({ success: false, error: 'Player not found', code: 'NOT_FOUND' });
   }
-  res.json({ success: true, player });
+  res.json({ success: true, player, ...freshness(PLAYER_SOURCES) });
 }
 
 function getPlayerPool(req, res) {
-  const players = loadPlayers();
+  const players   = loadPlayers();
   const positions = parseListParam(req.query.position);
 
   const pool = positions.length
@@ -54,7 +55,7 @@ function getPlayerPool(req, res) {
       })
     : players;
 
-  res.json({ success: true, players: pool, injuries: getInjuriesLastUpdated() });
+  res.json({ success: true, players: pool, ...freshness(PLAYER_SOURCES) });
 }
 
 module.exports = {

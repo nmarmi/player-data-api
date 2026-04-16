@@ -73,19 +73,62 @@ function isStale(source) {
 
 /**
  * Returns the full sync log for all sources.
- * @returns {Array<{source, last_sync_at, status, record_count, is_stale}>}
+ * @returns {Array<{source, lastSyncAt, status, recordCount, isStale, thresholdHours}>}
  */
 function getSyncStatus() {
   const db = getDb();
   const rows = db.prepare('SELECT * FROM data_sync_log ORDER BY source').all();
   return rows.map((row) => ({
-    source:       row.source,
-    lastSyncAt:   row.last_sync_at,
-    status:       row.status,
-    recordCount:  row.record_count,
-    isStale:      isStale(row.source),
+    source:         row.source,
+    lastSyncAt:     row.last_sync_at,
+    status:         row.status,
+    recordCount:    row.record_count,
+    isStale:        isStale(row.source),
     thresholdHours: STALENESS_THRESHOLDS_HOURS[row.source] ?? 24,
   }));
 }
 
-module.exports = { createSyncLogTable, recordSync, isStale, getSyncStatus, SOURCES };
+/**
+ * US-4.7: Returns a compact freshness summary for embedding in API responses.
+ *
+ * @param {string[]} [sources]  Optional subset of source names to consider.
+ *                              Defaults to all sources.
+ * @returns {{ dataAsOf: string|null, staleWarnings: Array }}
+ *
+ * dataAsOf     — ISO timestamp of the most recent successful sync among the
+ *                requested sources (null if no source has ever been synced).
+ * staleWarnings — array of stale sources; empty array when all are fresh.
+ *                 Each entry: { source, lastSyncAt, thresholdHours }
+ */
+function getDataFreshnessMeta(sources = null) {
+  let rows;
+  try {
+    rows = getSyncStatus();
+  } catch (_) {
+    // DB not available (e.g. running off JSON seed) — return safe defaults
+    return { dataAsOf: null, staleWarnings: [] };
+  }
+
+  const relevant = sources
+    ? rows.filter((r) => sources.includes(r.source))
+    : rows;
+
+  // Most recent successful sync timestamp across the relevant sources
+  const synced  = relevant.filter((r) => r.lastSyncAt);
+  const dataAsOf = synced.length
+    ? synced.reduce((max, r) => (r.lastSyncAt > max ? r.lastSyncAt : max), '')
+    : null;
+
+  // Sources that are overdue for a refresh
+  const staleWarnings = relevant
+    .filter((r) => r.isStale)
+    .map((r) => ({
+      source:         r.source,
+      lastSyncAt:     r.lastSyncAt,
+      thresholdHours: r.thresholdHours,
+    }));
+
+  return { dataAsOf, staleWarnings };
+}
+
+module.exports = { createSyncLogTable, recordSync, isStale, getSyncStatus, getDataFreshnessMeta, SOURCES };

@@ -6,8 +6,16 @@
  * exist (e.g. before import-stats has been run).
  */
 
-const { runValuations } = require('../services/valuationEngine');
-const { loadPlayers }   = require('../services/playersService');
+const { runValuations }         = require('../services/valuationEngine');
+const { loadPlayers }           = require('../services/playersService');
+const { getDataFreshnessMeta }  = require('../db/syncLog');
+
+// Sources that feed the valuation engine
+const VALUATION_SOURCES = ['player_metadata', 'player_stats'];
+
+function freshness() {
+  try { return getDataFreshnessMeta(VALUATION_SOURCES); } catch (_) { return {}; }
+}
 
 const DEFAULT_BUDGET       = 260;
 const DEFAULT_ROSTER_SLOTS = 23;
@@ -73,7 +81,7 @@ function getValuations(req, res) {
         success: true,
         valuations,
         meta,
-        dataAsOf: new Date().toISOString(),
+        ...freshness(),
       });
     }
     // Engine returned nothing (no stats) — fall through to placeholder
@@ -97,7 +105,7 @@ function getValuations(req, res) {
     success:    true,
     valuations,
     meta:       { note: 'Placeholder valuations — run import-stats to enable the full model' },
-    dataAsOf:   new Date().toISOString(),
+    ...freshness(),
   });
 }
 

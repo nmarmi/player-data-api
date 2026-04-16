@@ -4,10 +4,11 @@ const cors = require('cors');
 const path = require('path');
 
 //actual endpoints and handles routing
-const healthRouter = require('./routes/health');
+const healthRouter  = require('./routes/health');
 const licenseRouter = require('./routes/license');
 const playersRouter = require('./routes/players');
-const usageRouter = require('./routes/usage');
+const usageRouter   = require('./routes/usage');
+const adminRouter   = require('./routes/admin');
 
 const app = express();
 //controls who can call your api. The * is anyone good for testing, otherwise restricts frontend domains
@@ -41,12 +42,14 @@ app.use(`/api/${API_VERSION}/health`, healthRouter);
 app.use(`/api/${API_VERSION}/license`, licenseRouter);
 app.use(`/api/${API_VERSION}/players`, playersRouter);
 app.use(`/api/${API_VERSION}/usage`, usageRouter);
+app.use(`/api/${API_VERSION}/admin`, adminRouter);
 
 // Legacy unversioned routes (aliases — kept for backwards compatibility)
 app.use('/health', healthRouter);
 app.use('/license', licenseRouter);
 app.use('/players', playersRouter);
 app.use('/usage', usageRouter);
+app.use('/admin', adminRouter);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
