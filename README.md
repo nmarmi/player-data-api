@@ -79,7 +79,6 @@ npm start
 - **PLAYERS_DATA_PATH** – optional override path to player data JSON (default is `data/players.json`).
 
 ## Deploy to Vercel
-
 This repo is configured for Vercel using:
 
 - `api/index.js` as the serverless entrypoint
@@ -131,3 +130,4 @@ In the draft kit repo:
 - Add env: `PLAYER_API_URL` (e.g. `http://localhost:4001`), `PLAYER_API_KEY` (license key).
 - Replace local player fetch with `GET <PLAYER_API_URL>/players` and header `X-API-Key: <PLAYER_API_KEY>`.
 - Call `POST <PLAYER_API_URL>/usage` when the user does something (e.g. opens draft room), with the same license header.
+

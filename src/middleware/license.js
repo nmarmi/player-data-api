@@ -22,10 +22,10 @@ function requireLicense(req, res, next) {
   const key = getKeyFromRequest(req);
   const validKeys = getValidKeys();
   if (!validKeys.length) {
-    return res.status(500).json({ success: false, error: 'License not configured' });
+    return res.status(500).json({ success: false, error: 'License not configured', code: 'LICENSE_NOT_CONFIGURED' });
   }
   if (!key || !validKeys.includes(key)) {
-    return res.status(401).json({ success: false, error: 'Invalid or missing license' });
+    return res.status(401).json({ success: false, error: 'Invalid or missing license', code: 'UNAUTHORIZED' });
   }
   next();
 }

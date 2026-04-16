@@ -7,12 +7,18 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "import-csv": "node scripts/csv-to-players.js",
-    "import-mlb": "node scripts/fetch-mlb-data.js"
+    "import-mlb": "node scripts/fetch-mlb-data.js",
+    "import-mlb-db": "node src/jobs/ingestPlayerMetadata.js",
+    "import-injuries": "node src/jobs/ingestInjuries.js",
+    "import-depth-charts": "node src/jobs/ingestDepthCharts.js",
+    "import-transactions": "node src/jobs/ingestTransactions.js",
+    "import-stats": "node src/jobs/ingestStats.js"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
+    "better-sqlite3": "^12.9.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.21.0"
