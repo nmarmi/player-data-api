@@ -79,7 +79,6 @@ npm start
 - **PLAYERS_DATA_PATH** – optional override path to player data JSON (default is `data/players.json`).
 
 ## Deploy to Vercel
-
 This repo is configured for Vercel using:
 
 - `api/index.js` as the serverless entrypoint

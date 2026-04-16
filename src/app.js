@@ -3,28 +3,37 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 
+//actual endpoints and handles routing
 const healthRouter = require('./routes/health');
 const licenseRouter = require('./routes/license');
 const playersRouter = require('./routes/players');
 const usageRouter = require('./routes/usage');
 
 const app = express();
+//controls who can call your api. The * is anyone good for testing, otherwise restricts frontend domains
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
+//supports versioned APIs just in case we make changes later on, so we dont break the app
 const API_VERSION = 'v1';
 
+//middleware : runs before routes
+//allows requests from browsers. without this the frontend requests would be blocked
 app.use(cors({ origin: ALLOWED_ORIGIN }));
+//lets API read json request bodies
 app.use(express.json());
 
 // Attach apiVersion to every JSON response
 app.use((_req, res, next) => {
   const originalJson = res.json.bind(res);
+  //overrides how responses are sent
   res.json = (body) => {
     if (body && typeof body === 'object' && !Array.isArray(body)) {
       body.apiVersion = API_VERSION;
+      //essentially adds the api version type to every response
     }
     return originalJson(body);
   };
   next();
+  //moves onto middleware/routes
 });
 
 // v1 versioned routes
@@ -41,6 +50,7 @@ app.use('/usage', usageRouter);
 
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
+//root route
 app.get('/', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'demo.html'));
 });
