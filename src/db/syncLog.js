@@ -1,13 +1,14 @@
 const { getDb } = require('./connection');
 
-const SOURCES = ['player_metadata', 'injuries', 'depth_charts', 'transactions'];
+const SOURCES = ['player_metadata', 'injuries', 'depth_charts', 'transactions', 'player_stats'];
 
 /** Default staleness threshold in hours per source */
 const STALENESS_THRESHOLDS_HOURS = {
   player_metadata: 24,
   injuries:        1,
   depth_charts:    6,
-  transactions:    1,
+  transactions:    6,
+  player_stats:    24,   // historical season stats; effectively runs once per season
 };
 
 function createSyncLogTable() {
