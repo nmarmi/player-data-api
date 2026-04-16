@@ -28,17 +28,64 @@ function rowToPlayer(row) {
     mlbTeamId:   row.mlb_team_id,
     status:      row.status,
     isAvailable: row.is_available === 1,
-    ab: row.ab, r: row.r,   h: row.h,   hr: row.hr,
-    rbi: row.rbi, bb: row.bb, k: row.k, sb: row.sb,
-    avg: row.avg, obp: row.obp, slg: row.slg, fpts: row.fpts,
+    depthChartRank:     row.depth_chart_rank,
+    depthChartPosition: row.depth_chart_position,
+    ab:   row.ab,  r:   row.r,   h:   row.h,   hr:  row.hr,
+    rbi:  row.rbi, bb:  row.bb,  k:   row.k,   sb:  row.sb,
+    avg:  row.avg, obp: row.obp, slg: row.slg,
+    era:  row.era, whip: row.whip, w: row.w, sv: row.sv, ip: row.ip, k9: row.k9,
+    fpts: row.fpts,
   };
 }
+
+const STATS_JOIN_SQL = `
+  SELECT
+    p.player_id, p.mlb_person_id, p.name, p.player_name,
+    p.positions,  p.position,     p.mlb_team, p.mlb_team_id,
+    p.status,     p.is_available,
+    p.depth_chart_rank, p.depth_chart_position,
+    COALESCE(hs.ab,  0) AS ab,
+    COALESCE(hs.r,   0) AS r,
+    COALESCE(hs.h,   0) AS h,
+    COALESCE(hs.hr,  0) AS hr,
+    COALESCE(hs.rbi, 0) AS rbi,
+    COALESCE(hs.bb,  0) AS bb,
+    COALESCE(hs.k,   0) AS k,
+    COALESCE(hs.sb,  0) AS sb,
+    COALESCE(hs.avg, 0) AS avg,
+    COALESCE(hs.obp, 0) AS obp,
+    COALESCE(hs.slg, 0) AS slg,
+    COALESCE(ps.era,  0) AS era,
+    COALESCE(ps.whip, 0) AS whip,
+    COALESCE(ps.w,    0) AS w,
+    COALESCE(ps.sv,   0) AS sv,
+    COALESCE(ps.ip,   0) AS ip,
+    COALESCE(ps.k9,   0) AS k9,
+    (
+      COALESCE(hs.hr,  0) * 5 +
+      COALESCE(hs.rbi, 0) * 2 +
+      COALESCE(hs.r,   0) * 2 +
+      COALESCE(hs.sb,  0) * 3 +
+      COALESCE(ps.w,   0) * 7 +
+      COALESCE(ps.sv,  0) * 10 +
+      COALESCE(ps.ip,  0) * 0.5
+    ) AS fpts
+  FROM players p
+  LEFT JOIN player_stats hs
+    ON  hs.player_id  = p.player_id
+    AND hs.stat_group = 'hitting'
+    AND hs.season     = (SELECT MAX(season) FROM player_stats WHERE stat_group = 'hitting')
+  LEFT JOIN player_stats ps
+    ON  ps.player_id  = p.player_id
+    AND ps.stat_group = 'pitching'
+    AND ps.season     = (SELECT MAX(season) FROM player_stats WHERE stat_group = 'pitching')
+`;
 
 function loadPlayersFromDb() {
   const db = tryGetDb();
   if (!db) return null;
   try {
-    const rows = db.prepare('SELECT * FROM players').all();
+    const rows = db.prepare(STATS_JOIN_SQL).all();
     if (!rows.length) return null;
     return rows.map(rowToPlayer);
   } catch (_) { return null; }
@@ -62,6 +109,12 @@ const NUMERIC_FIELDS = new Set([
   'avg',
   'obp',
   'slg',
+  'era',
+  'whip',
+  'w',
+  'sv',
+  'ip',
+  'k9',
   'fpts',
 ]);
 
@@ -83,6 +136,12 @@ const SORTABLE_FIELDS = new Set([
   'avg',
   'obp',
   'slg',
+  'era',
+  'whip',
+  'w',
+  'sv',
+  'ip',
+  'k9',
   'fpts',
 ]);
 
