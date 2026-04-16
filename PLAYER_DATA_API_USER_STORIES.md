@@ -49,6 +49,10 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - US-7.3, US-7.5, US-8.2, US-8.3, US-8.4
 - Full test coverage and production readiness.
 
+### Phase 10: Legacy Cleanup & Bugfix (Milestone 3, alongside Draft Kit integration)
+- US-2.8, US-2.9
+- Deprecates unversioned routes with proper headers (US-2.8) and fixes the broken recommendations import (US-2.9) before Draft Kit starts calling `/players/recommendations` for real.
+
 ---
 
 ## Epic 1: Data Model & ID Standardization (Milestone 1)
@@ -164,6 +168,24 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - All error responses follow: `{ success: false, error: string, code?: string }`
 - 400 for bad requests, 401 for auth failures, 404 for not found, 500 for server errors
 - Validation errors include field-level detail where applicable
+
+### US-2.8: Deprecate legacy unversioned routes
+**As a** Draft Kit developer, **I want** a clear deprecation path for the unversioned `/players`, `/usage`, `/health`, `/license`, `/admin` routes, **so that** the client can migrate to `/api/v1/*` without surprise breakage.
+
+**Acceptance criteria:**
+- Every response from a legacy (unversioned) route sets a `Deprecation: true` header and a `Sunset: <RFC 7231 date>` header pointing at a documented cutover date
+- README advertises `/api/v1/*` as the supported surface and lists the legacy routes as deprecated
+- Server logs a single warning per process lifetime the first time a legacy route is hit (so we can watch it drain without log spam)
+- After the sunset date, legacy routes can be removed without code changes in any downstream consumer that followed US-11.5 in the Draft Kit
+
+### US-2.9: Fix recommendations controller to use the real valuation engine
+**As a** developer, **I want** `POST /players/recommendations` to delegate to `runValuations` from `services/valuationEngine`, **so that** the endpoint doesn't throw at runtime and its output is consistent with `POST /players/valuations`.
+
+**Acceptance criteria:**
+- `recommendationsController.js` no longer imports the non-existent `computeValuations` from `valuationsController.js`
+- When `player_stats` is populated, recommendations are derived from the same `runValuations` output that `/players/valuations` returns
+- When `player_stats` is empty, the placeholder fallback still works (same behavior as `/players/valuations`)
+- Integration test: `POST /api/v1/players/recommendations` with a minimal body returns `200` with a `recommendations` array (no 500)
 
 ---
 
@@ -322,6 +344,9 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Values are adjusted by value-above-replacement at each position
 - Roster slot configuration influences scarcity
 - Positions with fewer quality options show appropriate value inflation
+- **Integration contract:** `leagueSettings.rosterSlots` is accepted as **either** a flat integer (legacy placeholder shape) **or** a position map matching the Draft Kit's `DraftSession.leagueSettings.rosterSlots` (e.g. `{ "C":2, "1B":1, "2B":1, "3B":1, "SS":1, "OF":5, "UTIL":1, "SP":5, "RP":3, "BENCH":4 }`)
+- When a position map is supplied, the engine derives `hitterSlotsPerTeam` and `pitcherSlotsPerTeam` by partitioning the map keys (hitters: `C, 1B, 2B, 3B, SS, OF, UTIL, DH`; pitchers: `SP, RP, P`; `BENCH` is split proportionally or ignored, documented in code)
+- Unknown position keys are logged and ignored rather than crashing
 
 ### US-5.3: League-settings-aware valuations
 **As a** Draft Kit user with custom league settings, **I want** valuations to adjust to my specific league format.
@@ -332,6 +357,17 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Salary cap affects the dollar scale
 - Roster slot configuration affects positional demand
 - Valuations recalculate when league settings change
+- **Integration contract:** the endpoint accepts the Draft Kit's `DraftSession.leagueSettings` shape **directly**, with this canonical mapping applied server-side:
+
+  | Draft Kit field      | Engine field              | Notes                                                          |
+  |----------------------|---------------------------|----------------------------------------------------------------|
+  | `numberOfTeams`      | `numTeams`                | required                                                       |
+  | `salaryCap`          | `budget`                  | required                                                       |
+  | `rosterSlots` (map)  | `hitterSlotsPerTeam` / `pitcherSlotsPerTeam` | derived per US-5.2                            |
+  | `scoringType`        | selects `hittingCategories` / `pitchingCategories` presets | `"5x5 Roto"`→default, `"H2H Categories"`→same, `"Points"`→single `fpts` category |
+  | `draftType`          | ignored                   | must equal `"AUCTION"`                                         |
+- The engine's legacy field names (`numTeams`, `budget`, `hitterBudgetPct`, `hitterSlotsPerTeam`, `pitcherSlotsPerTeam`, `hittingCategories`, `pitchingCategories`, `statSeason`, `minAB`, `minIP`) are still accepted as overrides for backward compatibility and for internal callers
+- A single adapter function `normalizeLeagueSettings(input)` implements the mapping and is unit-tested with both shapes
 
 ### US-5.4: Draft-state-aware dynamic re-valuation
 **As a** Draft Kit user mid-draft, **I want** remaining player values to update based on what has already been purchased.
@@ -342,53 +378,83 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Remaining budget scarcity across teams affects dollar values
 - Positional scarcity recalculates based on filled roster slots
 - Response time is fast enough for live draft use (<3s)
+- **Integration contract:** `draftState` is the canonical cross-repo shape the Draft Kit sends for every valuation/recommendation/nomination call:
+
+  ```ts
+  draftState = {
+    availablePlayerIds: string[],                           // ["mlb-660271", ...]
+    purchasedPlayers: Array<{                               // empty pre-draft
+      playerId: string,                                     // "mlb-..."
+      teamId: string,                                       // "fantasy-team-3"
+      price: number,
+      positionFilled?: string                               // the roster slot it consumed
+    }>,
+    teamBudgets: Record<string, number>,                    // { "fantasy-team-3": 187, ... }
+    filledRosterSlots: Record<string, Record<string, number>>,
+                                                            // { "fantasy-team-3": { "OF": 2, "SS": 1, ... }, ... }
+    rosterSlots?: Record<string, number>                    // optional echo of leagueSettings.rosterSlots for per-team openings
+  }
+  ```
+- Remaining salary pool = `sum(teamBudgets)` minus `$1 × openSlotsAcrossAllTeams`; used in place of `(numTeams × budget)` when `purchasedPlayers.length > 0`
+- Remaining open slots per position = `sum over teams of (rosterSlots[pos] − filledRosterSlots[teamId][pos])`; drives positional replacement level
+- `availablePlayerIds` is authoritative — purchased players are excluded even if not in `purchasedPlayers[]`
+- Missing / empty `draftState` is treated as pre-draft and returns the static baseline valuation
 
 ### US-5.5: Value comparison view data
 **As a** Draft Kit user, **I want** to see each player's projected value alongside their purchase price.
 
 **Acceptance criteria:**
-- Valuation response includes both `projectedValue` and optional `purchasePrice` if provided
-- Includes a `valueGap` field (`projectedValue - purchasePrice`) for purchased players
-- Enables the Draft Kit to display "value" vs "paid" comparisons
+- Valuation response includes both `projectedValue` and, for purchased players, `purchasePrice`
+- **`purchasePrice` is resolved server-side from `draftState.purchasedPlayers`** — the client does not pass a separate field
+- Includes a `valueGap` field (`projectedValue - purchasePrice`) for purchased players only
+- Available players return `purchasePrice: null` and `valueGap: null`
+- Enables the Draft Kit to display "value" vs "paid" comparisons without additional lookups
 
 ---
 
 ## Epic 6: Recommendation Engine (Milestone 5)
+
+> All endpoints in this epic accept the same `{ leagueSettings, draftState, teamId? }` contract defined in US-5.3 and US-5.4. `teamId` format is `fantasy-team-{n}` as minted by the Draft Kit. Each endpoint includes a tier classification (`buy` / `fair` / `avoid`) and any threshold metadata in the response so the Draft Kit can render without duplicating logic.
 
 ### US-6.1: Best available player recommendations
 **As a** Draft Kit user, **I want** a ranked list of the best remaining players by value.
 
 **Acceptance criteria:**
 - `POST /players/recommendations` returns top N available players ranked by projected value
-- Accounts for current draft state
-- Response includes `playerId`, `name`, `projectedValue`, `rank`
+- Accounts for current draft state (delegates to the engine from US-5.4)
+- Response shape: `{ success: true, recommendations: [{ playerId, name, projectedValue, recommendedBid, rank, tier, reason }], thresholds: { buyAbove, avoidBelow } }`
+- `tier` is one of `"buy" | "fair" | "avoid"` — client renders color without re-computing
 
 ### US-6.2: Positional need recommendations
 **As a** Draft Kit user, **I want** recommendations that consider which roster slots I still need to fill.
 
 **Acceptance criteria:**
 - Request includes `teamId` identifying the user's fantasy team
+- Server looks up that team's state from `draftState.filledRosterSlots[teamId]` and `draftState.teamBudgets[teamId]`, and compares against `leagueSettings.rosterSlots`
 - Response highlights players at positions the user's team still needs
-- Includes a `positionalNeed` score or flag
-- Recommendations balance overall value with positional need
+- Each recommendation includes a numeric `positionalNeed` score (0–1) and a boolean `fillsOpenSlot` flag
+- Recommendations balance overall value with positional need (documented weighting)
+- Returns `400` with `code: "UNKNOWN_TEAM"` if `teamId` isn't present in `draftState.teamBudgets`
 
 ### US-6.3: Nomination suggestions
 **As a** Draft Kit user, **I want** suggestions for which players to nominate (put up for auction).
 
 **Acceptance criteria:**
 - `POST /players/recommendations/nominations` returns players to nominate
-- Strategy: suggest players other teams likely overpay for that the user doesn't need
-- Response includes `playerId`, `name`, `reason`
-- Considers remaining team budgets and roster needs across all teams
+- Strategy: suggest players *other* teams are likely to overpay for that the calling team doesn't need
+- Response shape: `{ success: true, nominations: [{ playerId, name, reason, expectedMarketBid, myTeamNeedScore }] }`
+- **Required inputs:** `availablePlayerIds`, `teamBudgets`, `filledRosterSlots`, `teamId` — the endpoint does **not** need `purchasedPlayers` detail (only aggregate budget state)
+- Documented strategy in README: ranks available players by `(expectedMarketBid − myTeamValueToFill)` descending
 
 ### US-6.4: Budget strategy recommendations
 **As a** Draft Kit user, **I want** guidance on how to allocate my remaining budget.
 
 **Acceptance criteria:**
 - Given user's team state, returns suggested budget allocation
-- Response shape: `{ allocations: [{ position, suggestedSpend, topTargets: [] }] }`
+- Response shape: `{ success: true, allocations: [{ position, suggestedSpend, openSlots, topTargets: [{ playerId, name, projectedValue }] }] }`
 - Accounts for remaining player pool quality at each position
-- Adjusts as the draft progresses
+- `openSlots` per position is derived from `filledRosterSlots[teamId]` vs `leagueSettings.rosterSlots`
+- Adjusts as the draft progresses (stateless — each call reflects the `draftState` in the request)
 
 ---
 
@@ -413,13 +479,16 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Tests verify positional scarcity adjustments change values correctly
 - Tests verify draft-state-aware recalculation produces different values than pre-draft
 - Tests verify league settings changes affect output
+- **Integration-shape test:** posts a body using the Draft Kit's `leagueSettings` shape (`numberOfTeams`, `salaryCap`, `rosterSlots` map, `scoringType: "5x5 Roto"`) and asserts the engine converges and returns a non-empty `valuations` array
+- **Adapter test:** `normalizeLeagueSettings` (from US-5.3) is tested with both the Draft Kit shape and the legacy engine shape and produces equivalent output for equivalent inputs
 
 ### US-7.4: Integration tests for API endpoints
 **Acceptance criteria:**
-- Tests cover all endpoints: `/players`, `/players/:id`, `/players/pool`, `/players/valuations`, `/players/recommendations`
-- Tests verify response shapes match documented contracts
+- Tests cover all endpoints: `/players`, `/players/:id`, `/players/pool`, `/players/valuations`, `/players/recommendations`, `/players/recommendations/nominations`
+- Tests verify response shapes match documented contracts (US-5.3, US-5.4, US-6.1–6.4)
 - Tests verify auth middleware rejects unauthenticated requests
-- Tests verify error responses for invalid inputs
+- Tests verify error responses for invalid inputs — including Draft-Kit-shaped bodies with missing `rosterSlots` or unknown `teamId` → `400` with field-level `fields: []` detail
+- Tests verify versioned (`/api/v1/*`) and legacy unversioned routes behave identically, and the legacy routes set the `Deprecation` + `Sunset` headers from US-2.8
 
 ### US-7.5: State transition tests for draft-aware endpoints
 **Acceptance criteria:**
@@ -503,12 +572,40 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 
 ---
 
+## Cross-Repo Contract Quick Reference
+
+These are the shapes both repos must agree on. They are defined by US-5.3, US-5.4, and US-5.5; reproduced here for quick lookup.
+
+```ts
+// Request body for /players/valuations, /players/recommendations, /players/recommendations/nominations
+{
+  leagueSettings: {
+    numberOfTeams: number,
+    salaryCap: number,
+    rosterSlots: { [position: string]: number },  // e.g. { C:2, "1B":1, ..., BENCH:4 }
+    scoringType: "5x5 Roto" | "H2H Categories" | "Points",
+    draftType: "AUCTION"
+  },
+  draftState: {
+    availablePlayerIds: string[],                  // "mlb-..."
+    purchasedPlayers: Array<{ playerId, teamId, price, positionFilled? }>,
+    teamBudgets: Record<string, number>,           // teamId -> remaining $
+    filledRosterSlots: Record<string, Record<string, number>>
+                                                   // teamId -> position -> count
+  },
+  teamId?: string                                  // "fantasy-team-3" (required for US-6.2, 6.3, 6.4)
+}
+```
+
+---
+
 ## Story Count Summary
 
 | Priority | Stories | Milestone |
 |----------|---------|-----------|
 | Must do now | 1.1–1.5, 2.1–2.3, 2.6–2.7, 9.1–9.3 | 1 |
 | Next | 2.4–2.5, 3.1–3.4, 7.1–7.2, 7.4, 8.1 | 2–3 |
+| Integration cleanup | 2.8, 2.9 | 3 |
 | Then | 4.1–4.8, 8.2, 8.4 | 4 |
 | Later | 5.1–5.5, 6.1–6.4, 7.3, 7.5, 8.3 | 5 |
-| **Total** | **40 stories** | |
+| **Total** | **47 stories** | |
