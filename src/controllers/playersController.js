@@ -3,6 +3,7 @@ const {
   buildPlayersQuery,
   applyPlayersQuery,
   getPlayerFilterOptions,
+  parseListParam,
 } = require('../services/playersService');
 
 function listPlayers(req, res) {
@@ -18,7 +19,24 @@ function getPlayerFilters(_req, res) {
   res.json({ success: true, filters });
 }
 
+function getPlayerPool(req, res) {
+  const players = loadPlayers();
+  const positions = parseListParam(req.query.position);
+
+  const pool = positions.length
+    ? players.filter((p) => {
+        const tokens = Array.isArray(p.positions)
+          ? p.positions.map((t) => t.toUpperCase())
+          : [];
+        return positions.some((pos) => tokens.includes(pos));
+      })
+    : players;
+
+  res.json({ success: true, players: pool });
+}
+
 module.exports = {
   listPlayers,
   getPlayerFilters,
+  getPlayerPool,
 };

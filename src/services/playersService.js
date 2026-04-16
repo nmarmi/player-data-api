@@ -390,4 +390,5 @@ module.exports = {
   buildPlayersQuery,
   applyPlayersQuery,
   getPlayerFilterOptions,
+  parseListParam,
 };
