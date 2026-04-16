@@ -19,6 +19,16 @@ function getPlayerFilters(_req, res) {
   res.json({ success: true, filters });
 }
 
+function getPlayerById(req, res) {
+  const players = loadPlayers();
+  const { playerId } = req.params;
+  const player = players.find((p) => p.playerId === playerId);
+  if (!player) {
+    return res.status(404).json({ success: false, error: 'Player not found' });
+  }
+  res.json({ success: true, player });
+}
+
 function getPlayerPool(req, res) {
   const players = loadPlayers();
   const positions = parseListParam(req.query.position);
@@ -39,4 +49,5 @@ module.exports = {
   listPlayers,
   getPlayerFilters,
   getPlayerPool,
+  getPlayerById,
 };
