@@ -27,12 +27,27 @@
 
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+
 let _getDb = null;
 function tryGetDb() {
   if (!_getDb) {
     try { _getDb = require('../db/connection').getDb; } catch (_) {}
   }
   try { return _getDb ? _getDb() : null; } catch (_) { return null; }
+}
+
+let _fallbackStats = null;
+function loadFallbackStats() {
+  if (_fallbackStats) return _fallbackStats;
+  try {
+    const filePath = path.join(__dirname, '..', '..', 'data', 'player-stats.json');
+    if (fs.existsSync(filePath)) {
+      _fallbackStats = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    }
+  } catch (_) {}
+  return _fallbackStats || [];
 }
 
 // ── Default league settings ───────────────────────────────────────────────────
@@ -88,19 +103,28 @@ function std(arr) {
  */
 function loadStatRows(season, group) {
   const db = tryGetDb();
-  if (!db) return [];
-  try {
-    return db.prepare(`
-      SELECT
-        p.player_id, p.name, p.positions, p.mlb_team, p.status, p.is_available,
-        ps.games_played, ps.ab, ps.r,  ps.h,  ps.hr, ps.rbi, ps.bb,
-        ps.k,  ps.sb, ps.avg, ps.obp, ps.slg, ps.ops,
-        ps.w,  ps.l,  ps.era, ps.whip, ps.k9, ps.ip, ps.sv, ps.hld
-      FROM players p
-      JOIN player_stats ps ON p.player_id = ps.player_id
-      WHERE ps.season = ? AND ps.stat_group = ?
-    `).all(season, group);
-  } catch (_) { return []; }
+  if (db) {
+    try {
+      const rows = db.prepare(`
+        SELECT
+          p.player_id, p.name, p.positions, p.mlb_team, p.status, p.is_available,
+          ps.games_played, ps.ab, ps.r,  ps.h,  ps.hr, ps.rbi, ps.bb,
+          ps.k,  ps.sb, ps.avg, ps.obp, ps.slg, ps.ops,
+          ps.w,  ps.l,  ps.era, ps.whip, ps.k9, ps.ip, ps.sv, ps.hld
+        FROM players p
+        JOIN player_stats ps ON p.player_id = ps.player_id
+        WHERE ps.season = ? AND ps.stat_group = ?
+      `).all(season, group);
+      if (rows.length) return rows;
+    } catch (_) {}
+  }
+
+  // Fallback to bundled JSON when DB is unavailable (e.g. Vercel serverless)
+  const allRows = loadFallbackStats();
+  if (!allRows.length) return [];
+  const maxSeason = allRows.reduce((max, r) => Math.max(max, r.season || 0), 0);
+  const targetSeason = season || maxSeason;
+  return allRows.filter((r) => r.season === targetSeason && r.stat_group === group);
 }
 
 // ── Core computation ──────────────────────────────────────────────────────────
