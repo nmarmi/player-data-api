@@ -1,5 +1,4 @@
 /**
- * Fantasy baseball auction dollar-value model — US-5.1 (baseline).
  *
  * Algorithm: z-score above replacement (SGP-style)
  * ─────────────────────────────────────────────────
@@ -22,7 +21,6 @@
  *    Everyone else receives $1 (minimum bid).
  *    freeSalaryPool = totalSalary − (poolSize × $1)
  *
- * This is the project's own model (required by Activity 7 / US-5.1).
  */
 
 'use strict';
