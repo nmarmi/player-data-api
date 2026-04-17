@@ -30,6 +30,7 @@
 const fs = require('fs');
 const path = require('path');
 
+// Lazily load the DB connection so the file doesn't crash if SQLite is unavailable
 let _getDb = null;
 function tryGetDb() {
   if (!_getDb) {
@@ -38,6 +39,7 @@ function tryGetDb() {
   try { return _getDb ? _getDb() : null; } catch (_) { return null; }
 }
 
+// Cache the fallback JSON in memory so we only read the file once per process
 let _fallbackStats = null;
 function loadFallbackStats() {
   if (_fallbackStats) return _fallbackStats;
@@ -55,12 +57,12 @@ function loadFallbackStats() {
 const DEFAULTS = {
   numTeams:       10,
   budget:         260,
-  // Salary split: hitters receive 67.5 %, pitchers 32.5 %
+  // Hitters get 67.5% of the total salary pool, pitchers get the remaining 32.5%
   hitterBudgetPct: 0.675,
   // Roster slots per team (US-5.2 / US-5.3 may override these)
   hitterSlotsPerTeam:  9,   // C, 1B, 2B, 3B, SS, OF×3, UTIL
   pitcherSlotsPerTeam: 5,   // SP×2, RP×2, P (flex)
-  // Minimum qualification thresholds
+  // Players below these thresholds are excluded — too few games to be meaningful
   minAB: 100,
   minIP:  40,
   // Season to use for stats (defaults to last calendar year)
@@ -102,6 +104,7 @@ function std(arr) {
  * @returns {Array<object>}
  */
 function loadStatRows(season, group) {
+  // STEP 1: Try to load stats from SQLite first
   const db = tryGetDb();
   if (db) {
     try {
@@ -119,7 +122,7 @@ function loadStatRows(season, group) {
     } catch (_) {}
   }
 
-  // Fallback to bundled JSON when DB is unavailable (e.g. Vercel serverless)
+  // STEP 1 (fallback): SQLite unavailable (e.g. Vercel serverless) — use the bundled JSON file
   const allRows = loadFallbackStats();
   if (!allRows.length) return [];
   const maxSeason = allRows.reduce((max, r) => Math.max(max, r.season || 0), 0);
@@ -145,13 +148,15 @@ function loadStatRows(season, group) {
 function computeZScores(pool, categories, settings) {
   const { negativeCategories, rateStats, rateStatVolume } = settings;
 
-  // Pre-compute pool means for each category
+  // STEP 3a: Find the average value for each category across the whole player pool
   const poolMeans = {};
   for (const cat of categories) {
     poolMeans[cat] = mean(pool.map((p) => p[cat] ?? 0));
   }
 
-  // Pre-compute std of contributions (volume-weighted for rate stats)
+  // STEP 3b: Find how spread out the values are for each category (standard deviation).
+  // For rate stats like AVG/ERA/WHIP, weight each player's contribution by playing time
+  // so that a .400 hitter in 20 AB doesn't outscore a .310 hitter in 600 AB.
   const poolStds = {};
   for (const cat of categories) {
     let contributions;
@@ -169,19 +174,23 @@ function computeZScores(pool, categories, settings) {
     let zTotal = 0;
 
     for (const cat of categories) {
+      // STEP 3c: Calculate how far above or below average this player is in this category
       let z;
       if (rateStats.has(cat)) {
+        // Rate stat: scale by playing time before comparing to the pool
         const volField = rateStatVolume[cat];
         const contribution = ((player[cat] ?? 0) - poolMeans[cat]) * (player[volField] ?? 0);
         z = contribution / poolStds[cat];
       } else {
+        // Counting stat: straightforward distance from the pool average
         z = ((player[cat] ?? 0) - poolMeans[cat]) / poolStds[cat];
       }
 
-      // Negate ERA/WHIP — lower is better in fantasy
+      // ERA and WHIP are flipped — a lower value is better in fantasy, so we negate the score
       if (negativeCategories.has(cat)) z = -z;
 
       zScores[cat] = z;
+      // STEP 4: Running total — sum all category scores into one overall score per player
       zTotal += z;
     }
 
@@ -198,30 +207,34 @@ function computeZScores(pool, categories, settings) {
  * @returns {Array<{playerId, name, dollarValue, projectedValue, rank, zScore, zScores, statGroup}>}
  */
 function assignDollarValues(scoredPool, replacementRank, totalSalary, statGroup) {
-  // Sort descending by z-score total
+  // STEP 5a: Rank all players best to worst by their total z-score
   const sorted = [...scoredPool].sort((a, b) => b.zTotal - a.zTotal);
 
-  // Replacement level z-score
+  // STEP 5b: Find the "replacement level" — the score of the last rostered player.
+  // Anyone ranked below this is freely available off the waiver wire and worth only $1.
   const replacementIdx = Math.min(replacementRank, sorted.length) - 1;
   const replacementZ   = sorted[replacementIdx]?.zTotal ?? 0;
 
-  // VAR for every player
+  // STEP 6: Value Above Replacement (VAR) = how much better each player is than replacement level
   const withVAR = sorted.map((p, i) => ({
     ...p,
     rank: i + 1,
     var:  p.zTotal - replacementZ,
   }));
 
+  // STEP 7a: Add up all the positive VAR — this is the pool we'll distribute salary across
   const positiveVAR   = withVAR.filter((p) => p.var > 0);
   const sumPositive   = positiveVAR.reduce((s, p) => s + p.var, 0);
-  // Every player gets $1 minimum; remaining pool is distributed by VAR share
+  // Reserve $1 for every rostered player as the minimum bid; the rest is "free salary" to distribute
   const freeSalary    = Math.max(0, totalSalary - withVAR.length);
 
   return withVAR.map((p) => {
     let dollarValue;
     if (p.var > 0 && sumPositive > 0) {
+      // STEP 7b: Each valuable player gets $1 + their proportional share of the free salary pool
       dollarValue = Math.max(1, Math.round(1 + (p.var / sumPositive) * freeSalary));
     } else {
+      // Player is at or below replacement level — minimum $1 bid
       dollarValue = 1;
     }
 
@@ -297,26 +310,28 @@ function computeValuations(hitterRows, pitcherRows, settings) {
     hittingCategories, pitchingCategories,
   } = settings;
 
+  // Split the total salary pool between hitters and pitchers
   const totalSalary   = numTeams * budget;
   const hitterSalary  = Math.round(totalSalary * hitterBudgetPct);
   const pitcherSalary = totalSalary - hitterSalary;
 
+  // Total roster spots across all teams — this determines the replacement level rank
   const hitterSlots  = numTeams * hitterSlotsPerTeam;
   const pitcherSlots = numTeams * pitcherSlotsPerTeam;
 
-  // Apply qualification thresholds
+  // STEP 2: Drop players who didn't play enough to have meaningful stats
   const hitters  = hitterRows.filter((p)  => (p.ab  ?? 0) >= minAB);
   const pitchers = pitcherRows.filter((p) => (p.ip  ?? 0) >= minIP);
 
-  // Compute z-scores
+  // STEPS 3 & 4: Score every player in each category and sum into a total z-score
   const scoredHitters  = computeZScores(hitters,  hittingCategories,  settings);
   const scoredPitchers = computeZScores(pitchers, pitchingCategories, settings);
 
-  // Assign dollar values relative to replacement level
+  // STEPS 5, 6 & 7: Find replacement level, calculate VAR, convert to dollar values
   const hitterVals  = assignDollarValues(scoredHitters,  hitterSlots,  hitterSalary,  'hitting');
   const pitcherVals = assignDollarValues(scoredPitchers, pitcherSlots, pitcherSalary, 'pitching');
 
-  // Merge and re-rank by dollar value descending
+  // Combine hitters and pitchers into one list ranked by dollar value
   return [...hitterVals, ...pitcherVals].sort((a, b) => b.dollarValue - a.dollarValue);
 }
 
@@ -329,8 +344,10 @@ function computeValuations(hitterRows, pitcherRows, settings) {
  */
 function runValuations(leagueSettings = {}, draftState = {}) {
   const settings = mergeSettings(leagueSettings);
+  // Default to last calendar year if no specific season is requested
   const season   = settings.statSeason || (new Date().getFullYear() - 1);
 
+  // STEP 1: Load all hitter and pitcher stat rows for the target season
   const allHitters  = loadStatRows(season, 'hitting');
   const allPitchers = loadStatRows(season, 'pitching');
 
@@ -338,7 +355,7 @@ function runValuations(leagueSettings = {}, draftState = {}) {
     return { valuations: [], meta: { season, note: 'No player stats found — run import-stats first' } };
   }
 
-  // Optionally filter to only the players still available in the draft
+  // If a live draft is in progress, only value players who haven't been picked yet
   let hitters  = allHitters;
   let pitchers = allPitchers;
   if (Array.isArray(draftState.availablePlayerIds) && draftState.availablePlayerIds.length) {
