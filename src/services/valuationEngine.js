@@ -1,6 +1,6 @@
 /**
  *
- * Algorithm: z-score above replacement (SGP-style)
+ * Algorithm: z-score above replacement
  * ─────────────────────────────────────────────────
  * 1. Load qualifying players + prior-season stats from player_stats.
  * 2. For each scoring category, compute a z-score across the pool.
