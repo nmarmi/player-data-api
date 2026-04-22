@@ -407,6 +407,11 @@ function poolQualityScore(player) {
   return Number.isFinite(id) && id >= 100000 ? 10 : 0;
 }
 
+function hasReliablePoolId(player) {
+  const id = Number(String(player.playerId || '').replace(/^mlb-/i, ''));
+  return Number.isFinite(id) && id >= 100000;
+}
+
 function dedupePoolPlayers(players = []) {
   const byId = new Map();
   for (const player of players) {
@@ -453,7 +458,33 @@ function dedupePoolPlayers(players = []) {
     byNameTeam.set(key, { ...best, positions: mergedPositions });
   }
 
-  return [...byNameTeam.values()];
+  const mergedByNameTeam = [...byNameTeam.values()];
+
+  const byNamePos = new Map();
+  for (const player of mergedByNameTeam) {
+    const posKey = [...new Set((player.positions || []).map((p) => String(p).toUpperCase()))]
+      .sort()
+      .join('|');
+    const key = [String(player.name || '').trim().toLowerCase(), posKey].join('||');
+    if (!byNamePos.has(key)) byNamePos.set(key, []);
+    byNamePos.get(key).push(player);
+  }
+
+  const finalPlayers = [];
+  for (const group of byNamePos.values()) {
+    const reliable = group.filter(hasReliablePoolId);
+    const legacy = group.filter((p) => !hasReliablePoolId(p));
+    if (reliable.length === 1 && legacy.length >= 1) {
+      const mergedPositions = [...new Set(group.flatMap((p) => p.positions || []))]
+        .map((p) => String(p).toUpperCase())
+        .sort();
+      finalPlayers.push({ ...reliable[0], positions: mergedPositions });
+    } else {
+      finalPlayers.push(...group);
+    }
+  }
+
+  return finalPlayers;
 }
 
 function loadPlayerPool() {

@@ -98,6 +98,10 @@ function mergePlayerRecords(a, b) {
   return base;
 }
 
+function hasReliablePersonId(player) {
+  return Number(player.mlbPersonId || 0) >= 100000;
+}
+
 function dedupePlayers(players = []) {
   // First dedupe strict duplicates by playerId.
   const byPlayerId = new Map();
@@ -135,7 +139,35 @@ function dedupePlayers(players = []) {
     else byNameTeam.set(key, mergePlayerRecords(existing, player));
   }
 
-  return [...byNameTeam.values()];
+  const mergedByNameTeam = [...byNameTeam.values()];
+
+  // Extra cleanup: if same name+position has one reliable MLB ID record and one or more
+  // low-ID legacy records (often stale team aliases), keep the reliable record.
+  const byNamePos = new Map();
+  for (const player of mergedByNameTeam) {
+    const key = [
+      String(player.name || player.playerName || '').trim().toLowerCase(),
+      canonicalPositions(player).join('|'),
+    ].join('||');
+    if (!byNamePos.has(key)) byNamePos.set(key, []);
+    byNamePos.get(key).push(player);
+  }
+
+  const finalPlayers = [];
+  for (const group of byNamePos.values()) {
+    const reliable = group.filter(hasReliablePersonId);
+    const legacy = group.filter((p) => !hasReliablePersonId(p));
+    if (reliable.length === 1 && legacy.length >= 1) {
+      // Merge any useful non-zero stat/position info into the reliable row, then keep one row.
+      let merged = reliable[0];
+      for (const oldRow of legacy) merged = mergePlayerRecords(merged, oldRow);
+      finalPlayers.push(merged);
+    } else {
+      finalPlayers.push(...group);
+    }
+  }
+
+  return finalPlayers;
 }
 
 const STATS_JOIN_SQL = `
