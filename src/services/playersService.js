@@ -38,14 +38,14 @@ function rowToPlayer(row) {
   };
 }
 
-function toCanonicalPositionKey(player) {
+function canonicalPositions(player) {
   const positions = Array.isArray(player.positions)
     ? player.positions
     : String(player.position || '')
         .split(',')
         .map((v) => v.trim())
         .filter(Boolean);
-  return [...new Set(positions.map((v) => String(v).toUpperCase()))].sort().join('|');
+  return [...new Set(positions.map((v) => String(v).toUpperCase()))].sort();
 }
 
 function playerQualityScore(player) {
@@ -63,6 +63,41 @@ function playerQualityScore(player) {
   return nonZeroCount * 1000 + fpts + idReliabilityBonus;
 }
 
+function playerIdentityKey(player) {
+  const mlbPersonId = Number(player.mlbPersonId || 0);
+  if (mlbPersonId >= 100000) return `pid:${mlbPersonId}`;
+  return [
+    String(player.name || player.playerName || '').trim().toLowerCase(),
+    String(player.mlbTeam || '').trim().toUpperCase(),
+  ].join('||');
+}
+
+function mergePlayerRecords(a, b) {
+  const base = playerQualityScore(a) >= playerQualityScore(b) ? { ...a } : { ...b };
+  const other = base === a ? b : a;
+
+  const mergedPositions = [...new Set([...canonicalPositions(base), ...canonicalPositions(other)])].sort();
+  base.positions = mergedPositions;
+  base.position = mergedPositions.join(',');
+
+  const numericFields = ['ab', 'r', 'h', 'hr', 'rbi', 'bb', 'k', 'sb', 'avg', 'obp', 'slg', 'era', 'whip', 'w', 'sv', 'ip', 'k9', 'fpts'];
+  for (const field of numericFields) {
+    const baseValue = Number(base[field] || 0);
+    const otherValue = Number(other[field] || 0);
+    if (baseValue === 0 && otherValue !== 0) base[field] = otherValue;
+  }
+
+  if (!base.mlbPersonId || Number(base.mlbPersonId) < 100000) {
+    const otherId = Number(other.mlbPersonId || 0);
+    if (otherId >= 100000) {
+      base.mlbPersonId = otherId;
+      base.playerId = `mlb-${otherId}`;
+    }
+  }
+
+  return base;
+}
+
 function dedupePlayers(players = []) {
   // First dedupe strict duplicates by playerId.
   const byPlayerId = new Map();
@@ -75,23 +110,32 @@ function dedupePlayers(players = []) {
     }
   }
 
-  // Then dedupe logical duplicates by (name + team + positions).
+  // Then dedupe logical duplicates by identity and merge positions/stats.
   const byIdentity = new Map();
   for (const player of byPlayerId.values()) {
-    const key = [
-      String(player.name || player.playerName || '').trim().toLowerCase(),
-      String(player.mlbTeam || '').trim().toUpperCase(),
-      toCanonicalPositionKey(player),
-    ].join('||');
+    const key = playerIdentityKey(player);
     if (!key || key.startsWith('||')) continue;
 
     const existing = byIdentity.get(key);
-    if (!existing || playerQualityScore(player) > playerQualityScore(existing)) {
-      byIdentity.set(key, player);
-    }
+    if (!existing) byIdentity.set(key, player);
+    else byIdentity.set(key, mergePlayerRecords(existing, player));
   }
 
-  return [...byIdentity.values()];
+  // Final safety pass: collapse any remaining duplicates by visible identity
+  // (same player name + MLB team), which catches legacy low-ID records.
+  const byNameTeam = new Map();
+  for (const player of byIdentity.values()) {
+    const key = [
+      String(player.name || player.playerName || '').trim().toLowerCase(),
+      String(player.mlbTeam || '').trim().toUpperCase(),
+    ].join('||');
+    if (!key || key.startsWith('||')) continue;
+    const existing = byNameTeam.get(key);
+    if (!existing) byNameTeam.set(key, player);
+    else byNameTeam.set(key, mergePlayerRecords(existing, player));
+  }
+
+  return [...byNameTeam.values()];
 }
 
 const STATS_JOIN_SQL = `

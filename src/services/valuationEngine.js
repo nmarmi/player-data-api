@@ -394,13 +394,11 @@ function normalizePoolPlayer(player) {
 }
 
 function canonicalPoolKey(player) {
-  const positions = Array.isArray(player.positions)
-    ? player.positions
-    : safeParsePositions(player.positions);
+  const id = Number(String(player.playerId || '').replace(/^mlb-/i, ''));
+  if (Number.isFinite(id) && id >= 100000) return `pid:${id}`;
   return [
     String(player.name || '').trim().toLowerCase(),
     String(player.mlbTeam || '').trim().toUpperCase(),
-    [...new Set(positions.map((p) => String(p).toUpperCase()))].sort().join('|'),
   ].join('||');
 }
 
@@ -425,12 +423,37 @@ function dedupePoolPlayers(players = []) {
     const key = canonicalPoolKey(player);
     if (!key || key.startsWith('||')) continue;
     const existing = byIdentity.get(key);
-    if (!existing || poolQualityScore(player) > poolQualityScore(existing)) {
+    if (!existing) {
       byIdentity.set(key, player);
+      continue;
     }
+    const best = poolQualityScore(player) > poolQualityScore(existing) ? player : existing;
+    const mergedPositions = [...new Set([...(existing.positions || []), ...(player.positions || [])])]
+      .map((p) => String(p).toUpperCase())
+      .sort();
+    byIdentity.set(key, { ...best, positions: mergedPositions });
   }
 
-  return [...byIdentity.values()];
+  const byNameTeam = new Map();
+  for (const player of byIdentity.values()) {
+    const key = [
+      String(player.name || '').trim().toLowerCase(),
+      String(player.mlbTeam || '').trim().toUpperCase(),
+    ].join('||');
+    if (!key || key.startsWith('||')) continue;
+    const existing = byNameTeam.get(key);
+    if (!existing) {
+      byNameTeam.set(key, player);
+      continue;
+    }
+    const best = poolQualityScore(player) > poolQualityScore(existing) ? player : existing;
+    const mergedPositions = [...new Set([...(existing.positions || []), ...(player.positions || [])])]
+      .map((p) => String(p).toUpperCase())
+      .sort();
+    byNameTeam.set(key, { ...best, positions: mergedPositions });
+  }
+
+  return [...byNameTeam.values()];
 }
 
 function loadPlayerPool() {
