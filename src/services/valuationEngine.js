@@ -76,6 +76,22 @@ const DEFAULTS = {
   rateStatVolume: { avg: 'ab', era: 'ip', whip: 'ip' },
 };
 
+const HITTER_POSITION_KEYS = new Set(['C', '1B', '2B', '3B', 'SS', 'OF', 'UTIL', 'DH']);
+const PITCHER_POSITION_KEYS = new Set(['SP', 'RP', 'P']);
+const DEFAULT_POSITION_SLOT_MAP = {
+  C: 1,
+  '1B': 1,
+  '2B': 1,
+  '3B': 1,
+  SS: 1,
+  OF: 3,
+  UTIL: 1,
+  SP: 2,
+  RP: 2,
+  P: 1,
+  BENCH: 0,
+};
+
 // ── Math helpers ──────────────────────────────────────────────────────────────
 
 function mean(arr) {
@@ -196,6 +212,85 @@ function computeZScores(pool, categories, settings) {
   });
 }
 
+function getEligibilityTokens(player, statGroup) {
+  const rawTokens = safeParsePositions(player.positions)
+    .map((p) => String(p || '').toUpperCase())
+    .filter(Boolean);
+  const tokens = new Set(rawTokens);
+
+  if (statGroup === 'hitting') {
+    const eligible = new Set();
+    for (const token of tokens) {
+      if (HITTER_POSITION_KEYS.has(token)) eligible.add(token);
+    }
+    eligible.add('UTIL');
+    return eligible;
+  }
+
+  const eligible = new Set();
+  for (const token of tokens) {
+    if (token === 'P') {
+      eligible.add('P');
+      eligible.add('SP');
+      eligible.add('RP');
+    } else if (token === 'SP') {
+      eligible.add('SP');
+      eligible.add('P');
+    } else if (token === 'RP') {
+      eligible.add('RP');
+      eligible.add('P');
+    }
+  }
+  if (!eligible.size) {
+    eligible.add('P');
+    eligible.add('SP');
+    eligible.add('RP');
+  }
+  return eligible;
+}
+
+function buildReplacementByPosition(scoredPool, totalDemandByPosition, statGroup) {
+  const replacementByPosition = {};
+  for (const [position, totalSlots] of Object.entries(totalDemandByPosition || {})) {
+    const demand = Number(totalSlots) || 0;
+    if (demand <= 0) continue;
+
+    const candidates = scoredPool.filter((player) =>
+      getEligibilityTokens(player, statGroup).has(position)
+    );
+    if (!candidates.length) {
+      replacementByPosition[position] = 0;
+      continue;
+    }
+
+    const sorted = [...candidates].sort((a, b) => b.zTotal - a.zTotal);
+    const replacementIdx = Math.min(demand, sorted.length) - 1;
+    replacementByPosition[position] = sorted[replacementIdx]?.zTotal ?? 0;
+  }
+  return replacementByPosition;
+}
+
+function getPositionalScarcityVar(player, statGroup, replacementByPosition) {
+  const eligible = getEligibilityTokens(player, statGroup);
+  let bestVar = Number.NEGATIVE_INFINITY;
+  let bestPosition = null;
+
+  for (const position of eligible) {
+    const replacementZ = replacementByPosition[position];
+    if (replacementZ === undefined) continue;
+    const valueAboveReplacement = (player.zTotal || 0) - replacementZ;
+    if (valueAboveReplacement > bestVar) {
+      bestVar = valueAboveReplacement;
+      bestPosition = position;
+    }
+  }
+
+  if (!Number.isFinite(bestVar)) {
+    return { valueAboveReplacement: Number.NEGATIVE_INFINITY, scarcityPosition: null };
+  }
+  return { valueAboveReplacement: bestVar, scarcityPosition: bestPosition };
+}
+
 /**
  * Assigns dollar values to a scored player pool.
  *
@@ -204,7 +299,13 @@ function computeZScores(pool, categories, settings) {
  * @param {number} totalSalary     - total dollars available for this group
  * @returns {Array<{playerId, name, dollarValue, projectedValue, rank, zScore, zScores, statGroup}>}
  */
-function assignDollarValues(scoredPool, replacementRank, totalSalary, statGroup) {
+function assignDollarValues(
+  scoredPool,
+  replacementRank,
+  totalSalary,
+  statGroup,
+  replacementByPosition = {}
+) {
   // STEP 5a: Rank all players best to worst by their total z-score
   const sorted = [...scoredPool].sort((a, b) => b.zTotal - a.zTotal);
 
@@ -213,24 +314,33 @@ function assignDollarValues(scoredPool, replacementRank, totalSalary, statGroup)
   const replacementIdx = Math.min(replacementRank, sorted.length) - 1;
   const replacementZ   = sorted[replacementIdx]?.zTotal ?? 0;
 
-  // STEP 6: Value Above Replacement (VAR) = how much better each player is than replacement level
-  const withVAR = sorted.map((p, i) => ({
-    ...p,
-    rank: i + 1,
-    var:  p.zTotal - replacementZ,
-  }));
+  const withVAR = sorted.map((p, i) => {
+    const overallVar = (p.zTotal || 0) - replacementZ;
+    const scarcity = getPositionalScarcityVar(p, statGroup, replacementByPosition);
+    const scarcityVar = Number.isFinite(scarcity.valueAboveReplacement)
+      ? scarcity.valueAboveReplacement
+      : overallVar;
+    const adjustedVar = Math.max(overallVar, scarcityVar);
+    return {
+      ...p,
+      rank: i + 1,
+      var: overallVar,
+      scarcityVar,
+      adjustedVar,
+      scarcityPosition: scarcity.scarcityPosition,
+    };
+  });
 
-  // STEP 7a: Add up all the positive VAR — this is the pool we'll distribute salary across
-  const positiveVAR   = withVAR.filter((p) => p.var > 0);
-  const sumPositive   = positiveVAR.reduce((s, p) => s + p.var, 0);
+  const positiveVAR   = withVAR.filter((p) => p.adjustedVar > 0);
+  const sumPositive   = positiveVAR.reduce((s, p) => s + p.adjustedVar, 0);
   // Reserve $1 for every rostered player as the minimum bid; the rest is "free salary" to distribute
   const freeSalary    = Math.max(0, totalSalary - withVAR.length);
 
   return withVAR.map((p) => {
     let dollarValue;
-    if (p.var > 0 && sumPositive > 0) {
+    if (p.adjustedVar > 0 && sumPositive > 0) {
       // STEP 7b: Each valuable player gets $1 + their proportional share of the free salary pool
-      dollarValue = Math.max(1, Math.round(1 + (p.var / sumPositive) * freeSalary));
+      dollarValue = Math.max(1, Math.round(1 + (p.adjustedVar / sumPositive) * freeSalary));
     } else {
       // Player is at or below replacement level — minimum $1 bid
       dollarValue = 1;
@@ -246,6 +356,9 @@ function assignDollarValues(scoredPool, replacementRank, totalSalary, statGroup)
       rank:           p.rank,
       zScore:         Math.round(p.zTotal * 1000) / 1000,
       zScores:        roundZScores(p.zScores),
+      valueAboveReplacement: Math.round(p.var * 1000) / 1000,
+      positionalValueAboveReplacement: Math.round((p.scarcityVar || 0) * 1000) / 1000,
+      scarcityPosition: p.scarcityPosition,
       statGroup,
     };
   });
@@ -359,6 +472,83 @@ function calibrateValuationTotals(valuations, targetTotal) {
   return scaled;
 }
 
+function parseRosterSlotsConfig(leagueSettings = {}) {
+  const rosterSlots = leagueSettings.rosterSlots;
+
+  if (rosterSlots === undefined || rosterSlots === null) {
+    return {
+      positionSlotMap: { ...DEFAULT_POSITION_SLOT_MAP },
+      hitterSlotsPerTeam: DEFAULTS.hitterSlotsPerTeam,
+      pitcherSlotsPerTeam: DEFAULTS.pitcherSlotsPerTeam,
+      unknownKeys: [],
+      ignoredBench: 0,
+      legacyFlatSlots: null,
+    };
+  }
+
+  if (typeof rosterSlots === 'number' && Number.isFinite(rosterSlots) && rosterSlots > 0) {
+    return {
+      positionSlotMap: { ...DEFAULT_POSITION_SLOT_MAP },
+      hitterSlotsPerTeam: DEFAULTS.hitterSlotsPerTeam,
+      pitcherSlotsPerTeam: DEFAULTS.pitcherSlotsPerTeam,
+      unknownKeys: [],
+      ignoredBench: 0,
+      legacyFlatSlots: Math.floor(rosterSlots),
+    };
+  }
+
+  if (typeof rosterSlots !== 'object' || Array.isArray(rosterSlots)) {
+    return {
+      positionSlotMap: { ...DEFAULT_POSITION_SLOT_MAP },
+      hitterSlotsPerTeam: DEFAULTS.hitterSlotsPerTeam,
+      pitcherSlotsPerTeam: DEFAULTS.pitcherSlotsPerTeam,
+      unknownKeys: [],
+      ignoredBench: 0,
+      legacyFlatSlots: null,
+    };
+  }
+
+  const positionSlotMap = {};
+  const unknownKeys = [];
+  let ignoredBench = 0;
+
+  for (const [rawKey, rawValue] of Object.entries(rosterSlots)) {
+    const key = String(rawKey || '').trim().toUpperCase();
+    const count = Math.max(0, Math.floor(Number(rawValue) || 0));
+    if (!count) continue;
+
+    // BENCH is intentionally ignored for scarcity demand.
+    if (key === 'BENCH') {
+      ignoredBench += count;
+      continue;
+    }
+
+    if (HITTER_POSITION_KEYS.has(key) || PITCHER_POSITION_KEYS.has(key)) {
+      positionSlotMap[key] = (positionSlotMap[key] || 0) + count;
+    } else {
+      unknownKeys.push(key);
+    }
+  }
+
+  const hitterSlotsPerTeam = Object.entries(positionSlotMap)
+    .filter(([key]) => HITTER_POSITION_KEYS.has(key))
+    .reduce((sum, [, count]) => sum + count, 0);
+  const pitcherSlotsPerTeam = Object.entries(positionSlotMap)
+    .filter(([key]) => PITCHER_POSITION_KEYS.has(key))
+    .reduce((sum, [, count]) => sum + count, 0);
+
+  return {
+    positionSlotMap: Object.keys(positionSlotMap).length
+      ? positionSlotMap
+      : { ...DEFAULT_POSITION_SLOT_MAP },
+    hitterSlotsPerTeam: hitterSlotsPerTeam || DEFAULTS.hitterSlotsPerTeam,
+    pitcherSlotsPerTeam: pitcherSlotsPerTeam || DEFAULTS.pitcherSlotsPerTeam,
+    unknownKeys,
+    ignoredBench,
+    legacyFlatSlots: null,
+  };
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -366,13 +556,18 @@ function calibrateValuationTotals(valuations, targetTotal) {
  * Numeric string values are coerced to numbers.
  */
 function mergeSettings(leagueSettings = {}) {
+  const slotsConfig = parseRosterSlotsConfig(leagueSettings);
+  if (slotsConfig.unknownKeys.length) {
+    console.warn('[valuations] Ignoring unknown roster slot keys:', slotsConfig.unknownKeys.join(', '));
+  }
+
   return {
     ...DEFAULTS,
     numTeams:            Number(leagueSettings.numTeams)            || DEFAULTS.numTeams,
     budget:              Number(leagueSettings.budget)              || DEFAULTS.budget,
     hitterBudgetPct:     Number(leagueSettings.hitterBudgetPct)     || DEFAULTS.hitterBudgetPct,
-    hitterSlotsPerTeam:  Number(leagueSettings.hitterSlotsPerTeam)  || DEFAULTS.hitterSlotsPerTeam,
-    pitcherSlotsPerTeam: Number(leagueSettings.pitcherSlotsPerTeam) || DEFAULTS.pitcherSlotsPerTeam,
+    hitterSlotsPerTeam:  Number(leagueSettings.hitterSlotsPerTeam)  || slotsConfig.hitterSlotsPerTeam,
+    pitcherSlotsPerTeam: Number(leagueSettings.pitcherSlotsPerTeam) || slotsConfig.pitcherSlotsPerTeam,
     minAB:               Number(leagueSettings.minAB)               || DEFAULTS.minAB,
     minIP:               Number(leagueSettings.minIP)               || DEFAULTS.minIP,
     statSeason:          Number(leagueSettings.statSeason)          || null,
@@ -382,6 +577,10 @@ function mergeSettings(leagueSettings = {}) {
     negativeCategories:  DEFAULTS.negativeCategories,
     rateStats:           DEFAULTS.rateStats,
     rateStatVolume:      DEFAULTS.rateStatVolume,
+    positionSlotMap: slotsConfig.positionSlotMap,
+    unknownRosterSlotKeys: slotsConfig.unknownKeys,
+    ignoredBenchSlots: slotsConfig.ignoredBench,
+    legacyFlatRosterSlots: slotsConfig.legacyFlatSlots,
   };
 }
 
@@ -399,7 +598,7 @@ function computeValuations(hitterRows, pitcherRows, poolPlayers, settings) {
     numTeams, budget, hitterBudgetPct,
     hitterSlotsPerTeam, pitcherSlotsPerTeam,
     minAB, minIP,
-    hittingCategories, pitchingCategories,
+    hittingCategories, pitchingCategories, positionSlotMap,
   } = settings;
 
   // Split the total salary pool between hitters and pitchers
@@ -419,9 +618,40 @@ function computeValuations(hitterRows, pitcherRows, poolPlayers, settings) {
   const scoredHitters  = computeZScores(hitters,  hittingCategories,  settings);
   const scoredPitchers = computeZScores(pitchers, pitchingCategories, settings);
 
+  const hitterDemand = {};
+  const pitcherDemand = {};
+  for (const [position, count] of Object.entries(positionSlotMap || {})) {
+    if (!count) continue;
+    if (HITTER_POSITION_KEYS.has(position)) hitterDemand[position] = count * numTeams;
+    if (PITCHER_POSITION_KEYS.has(position)) pitcherDemand[position] = count * numTeams;
+  }
+
+  const hitterReplacementByPosition = buildReplacementByPosition(
+    scoredHitters,
+    hitterDemand,
+    'hitting'
+  );
+  const pitcherReplacementByPosition = buildReplacementByPosition(
+    scoredPitchers,
+    pitcherDemand,
+    'pitching'
+  );
+
   // STEPS 5, 6 & 7: Find replacement level, calculate VAR, convert to dollar values
-  const hitterVals  = assignDollarValues(scoredHitters,  hitterSlots,  hitterSalary,  'hitting');
-  const pitcherVals = assignDollarValues(scoredPitchers, pitcherSlots, pitcherSalary, 'pitching');
+  const hitterVals = assignDollarValues(
+    scoredHitters,
+    hitterSlots,
+    hitterSalary,
+    'hitting',
+    hitterReplacementByPosition
+  );
+  const pitcherVals = assignDollarValues(
+    scoredPitchers,
+    pitcherSlots,
+    pitcherSalary,
+    'pitching',
+    pitcherReplacementByPosition
+  );
 
   const pool = Array.isArray(poolPlayers)
     ? poolPlayers.map(normalizePoolPlayer).filter((p) => p.playerId)
@@ -513,6 +743,12 @@ function runValuations(leagueSettings = {}, draftState = {}) {
     targetTotalValue: settings.numTeams * settings.budget,
     valuationCount: valuations.length,
     calibrationError: roundCurrency(totalValue - (settings.numTeams * settings.budget)),
+    rosterSlotConfig: {
+      positionSlotMap: settings.positionSlotMap,
+      ignoredBenchSlots: settings.ignoredBenchSlots,
+      unknownRosterSlotKeys: settings.unknownRosterSlotKeys,
+      legacyFlatRosterSlots: settings.legacyFlatRosterSlots,
+    },
   };
 
   return { valuations, meta };

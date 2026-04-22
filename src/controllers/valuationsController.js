@@ -72,11 +72,20 @@ function getValuations(req, res) {
   ) {
     errors.push({ field: 'leagueSettings.numTeams', message: 'Must be a positive number' });
   }
-  if (
-    leagueSettings.rosterSlots !== undefined &&
-    (isNaN(Number(leagueSettings.rosterSlots)) || Number(leagueSettings.rosterSlots) <= 0)
-  ) {
-    errors.push({ field: 'leagueSettings.rosterSlots', message: 'Must be a positive number' });
+  if (leagueSettings.rosterSlots !== undefined) {
+    const rs = leagueSettings.rosterSlots;
+    const isPositiveNumber = typeof rs === 'number' && Number.isFinite(rs) && rs > 0;
+    const isPositionMap =
+      rs !== null &&
+      typeof rs === 'object' &&
+      !Array.isArray(rs) &&
+      Object.values(rs).every((v) => Number.isFinite(Number(v)) && Number(v) >= 0);
+    if (!isPositiveNumber && !isPositionMap) {
+      errors.push({
+        field: 'leagueSettings.rosterSlots',
+        message: 'Must be a positive number or an object map of position->slotCount',
+      });
+    }
   }
   if (
     draftState.availablePlayerIds !== undefined &&
