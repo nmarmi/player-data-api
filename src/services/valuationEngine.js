@@ -393,6 +393,46 @@ function normalizePoolPlayer(player) {
   };
 }
 
+function canonicalPoolKey(player) {
+  const positions = Array.isArray(player.positions)
+    ? player.positions
+    : safeParsePositions(player.positions);
+  return [
+    String(player.name || '').trim().toLowerCase(),
+    String(player.mlbTeam || '').trim().toUpperCase(),
+    [...new Set(positions.map((p) => String(p).toUpperCase()))].sort().join('|'),
+  ].join('||');
+}
+
+function poolQualityScore(player) {
+  const id = Number(String(player.playerId || '').replace(/^mlb-/i, ''));
+  return Number.isFinite(id) && id >= 100000 ? 10 : 0;
+}
+
+function dedupePoolPlayers(players = []) {
+  const byId = new Map();
+  for (const player of players) {
+    const normalized = normalizePoolPlayer(player);
+    if (!normalized.playerId) continue;
+    const existing = byId.get(normalized.playerId);
+    if (!existing || poolQualityScore(normalized) > poolQualityScore(existing)) {
+      byId.set(normalized.playerId, normalized);
+    }
+  }
+
+  const byIdentity = new Map();
+  for (const player of byId.values()) {
+    const key = canonicalPoolKey(player);
+    if (!key || key.startsWith('||')) continue;
+    const existing = byIdentity.get(key);
+    if (!existing || poolQualityScore(player) > poolQualityScore(existing)) {
+      byIdentity.set(key, player);
+    }
+  }
+
+  return [...byIdentity.values()];
+}
+
 function loadPlayerPool() {
   const db = tryGetDb();
   if (db) {
@@ -402,12 +442,12 @@ function loadPlayerPool() {
         FROM players
       `).all();
       if (rows.length) {
-        return rows.map((row) => ({
+        return dedupePoolPlayers(rows.map((row) => ({
           playerId: row.player_id,
           name: row.name,
           mlbTeam: row.mlb_team,
           positions: safeParsePositions(row.positions),
-        }));
+        })));
       }
     } catch (_) {}
   }
@@ -426,7 +466,7 @@ function loadPlayerPool() {
       positions: safeParsePositions(row.positions),
     });
   }
-  return [...byId.values()];
+  return dedupePoolPlayers([...byId.values()]);
 }
 
 function calibrateValuationTotals(valuations, targetTotal) {

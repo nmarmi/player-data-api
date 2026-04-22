@@ -38,6 +38,62 @@ function rowToPlayer(row) {
   };
 }
 
+function toCanonicalPositionKey(player) {
+  const positions = Array.isArray(player.positions)
+    ? player.positions
+    : String(player.position || '')
+        .split(',')
+        .map((v) => v.trim())
+        .filter(Boolean);
+  return [...new Set(positions.map((v) => String(v).toUpperCase()))].sort().join('|');
+}
+
+function playerQualityScore(player) {
+  const numericFields = ['ab', 'r', 'h', 'hr', 'rbi', 'bb', 'k', 'sb', 'avg', 'obp', 'slg', 'w', 'sv', 'ip', 'k9', 'fpts'];
+  const nonZeroCount = numericFields.reduce((count, field) => {
+    const value = Number(player[field] || 0);
+    return count + (value !== 0 ? 1 : 0);
+  }, 0);
+
+  const fpts = Number(player.fpts || 0);
+  const mlbPersonId = Number(player.mlbPersonId || 0);
+  // Real MLB IDs are typically 6+ digits; old synthetic IDs in this repo are often tiny.
+  const idReliabilityBonus = mlbPersonId >= 100000 ? 500 : 0;
+
+  return nonZeroCount * 1000 + fpts + idReliabilityBonus;
+}
+
+function dedupePlayers(players = []) {
+  // First dedupe strict duplicates by playerId.
+  const byPlayerId = new Map();
+  for (const player of players) {
+    const id = String(player.playerId || '').trim();
+    if (!id) continue;
+    const existing = byPlayerId.get(id);
+    if (!existing || playerQualityScore(player) > playerQualityScore(existing)) {
+      byPlayerId.set(id, player);
+    }
+  }
+
+  // Then dedupe logical duplicates by (name + team + positions).
+  const byIdentity = new Map();
+  for (const player of byPlayerId.values()) {
+    const key = [
+      String(player.name || player.playerName || '').trim().toLowerCase(),
+      String(player.mlbTeam || '').trim().toUpperCase(),
+      toCanonicalPositionKey(player),
+    ].join('||');
+    if (!key || key.startsWith('||')) continue;
+
+    const existing = byIdentity.get(key);
+    if (!existing || playerQualityScore(player) > playerQualityScore(existing)) {
+      byIdentity.set(key, player);
+    }
+  }
+
+  return [...byIdentity.values()];
+}
+
 const STATS_JOIN_SQL = `
   SELECT
     p.player_id, p.mlb_person_id, p.name, p.player_name,
@@ -87,7 +143,7 @@ function loadPlayersFromDb() {
   try {
     const rows = db.prepare(STATS_JOIN_SQL).all();
     if (!rows.length) return null;
-    return rows.map(rowToPlayer);
+    return dedupePlayers(rows.map(rowToPlayer));
   } catch (_) { return null; }
 }
 
@@ -257,7 +313,7 @@ function loadPlayers() {
     players = readPlayersFromPath(externalPlayersPath) || readPlayersFromPath(playersDataPath);
   } catch (_) {}
   if (!Array.isArray(players) || !players.length) players = fallbackPlayers;
-  return players.map(normalizePlayerRecord);
+  return dedupePlayers(players.map(normalizePlayerRecord));
 }
 
 function firstValue(value) {
