@@ -265,6 +265,100 @@ function roundZScores(zs) {
   return out;
 }
 
+function roundCurrency(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function normalizePoolPlayer(player) {
+  return {
+    playerId: String(player.playerId || player.player_id || ''),
+    name: String(player.name || player.playerName || ''),
+    mlbTeam: String(player.mlbTeam || player.mlb_team || ''),
+    positions: Array.isArray(player.positions)
+      ? player.positions
+      : safeParsePositions(player.positions),
+  };
+}
+
+function loadPlayerPool() {
+  const db = tryGetDb();
+  if (db) {
+    try {
+      const rows = db.prepare(`
+        SELECT player_id, name, mlb_team, positions
+        FROM players
+      `).all();
+      if (rows.length) {
+        return rows.map((row) => ({
+          playerId: row.player_id,
+          name: row.name,
+          mlbTeam: row.mlb_team,
+          positions: safeParsePositions(row.positions),
+        }));
+      }
+    } catch (_) {}
+  }
+
+  const fallback = loadFallbackStats();
+  if (!fallback.length) return [];
+
+  const byId = new Map();
+  for (const row of fallback) {
+    const id = String(row.player_id || '');
+    if (!id || byId.has(id)) continue;
+    byId.set(id, {
+      playerId: id,
+      name: String(row.name || ''),
+      mlbTeam: String(row.mlb_team || ''),
+      positions: safeParsePositions(row.positions),
+    });
+  }
+  return [...byId.values()];
+}
+
+function calibrateValuationTotals(valuations, targetTotal) {
+  if (!Array.isArray(valuations) || !valuations.length) return [];
+
+  const target = roundCurrency(Math.max(0, Number(targetTotal) || 0));
+  const current = roundCurrency(
+    valuations.reduce((sum, v) => sum + (Number(v.dollarValue) || 0), 0)
+  );
+
+  // If we have no signal values, split salary pool evenly.
+  if (current === 0) {
+    const even = roundCurrency(target / valuations.length);
+    const next = valuations.map((v) => ({
+      ...v,
+      dollarValue: even,
+      projectedValue: even,
+    }));
+    const fixed = roundCurrency(target - roundCurrency(even * valuations.length));
+    if (fixed !== 0) {
+      next[0].dollarValue = roundCurrency(next[0].dollarValue + fixed);
+      next[0].projectedValue = next[0].dollarValue;
+    }
+    return next;
+  }
+
+  const ratio = target / current;
+  const scaled = valuations.map((v) => {
+    const value = roundCurrency((Number(v.dollarValue) || 0) * ratio);
+    return { ...v, dollarValue: value, projectedValue: value };
+  });
+
+  // Correct residual cents so totals line up exactly.
+  const scaledTotal = roundCurrency(
+    scaled.reduce((sum, v) => sum + (Number(v.dollarValue) || 0), 0)
+  );
+  const diff = roundCurrency(target - scaledTotal);
+  if (diff !== 0 && scaled.length) {
+    scaled[0].dollarValue = roundCurrency(scaled[0].dollarValue + diff);
+    scaled[0].projectedValue = scaled[0].dollarValue;
+  }
+
+  return scaled;
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
@@ -300,7 +394,7 @@ function mergeSettings(leagueSettings = {}) {
  * @param {object} settings     - merged league settings (from mergeSettings)
  * @returns {Array}             - combined sorted valuations
  */
-function computeValuations(hitterRows, pitcherRows, settings) {
+function computeValuations(hitterRows, pitcherRows, poolPlayers, settings) {
   const {
     numTeams, budget, hitterBudgetPct,
     hitterSlotsPerTeam, pitcherSlotsPerTeam,
@@ -329,8 +423,44 @@ function computeValuations(hitterRows, pitcherRows, settings) {
   const hitterVals  = assignDollarValues(scoredHitters,  hitterSlots,  hitterSalary,  'hitting');
   const pitcherVals = assignDollarValues(scoredPitchers, pitcherSlots, pitcherSalary, 'pitching');
 
-  // Combine hitters and pitchers into one list ranked by dollar value
-  return [...hitterVals, ...pitcherVals].sort((a, b) => b.dollarValue - a.dollarValue);
+  const pool = Array.isArray(poolPlayers)
+    ? poolPlayers.map(normalizePoolPlayer).filter((p) => p.playerId)
+    : [];
+
+  const byPlayerId = new Map();
+  for (const valuation of [...hitterVals, ...pitcherVals]) {
+    byPlayerId.set(valuation.playerId, valuation);
+  }
+
+  const withFullPool = pool.length
+    ? pool.map((player) => {
+        const fromModel = byPlayerId.get(player.playerId);
+        if (fromModel) return fromModel;
+        return {
+          playerId: player.playerId,
+          name: player.name,
+          mlbTeam: player.mlbTeam,
+          positions: player.positions,
+          dollarValue: 0,
+          projectedValue: 0,
+          rank: null,
+          zScore: null,
+          zScores: {},
+          statGroup: 'unscored',
+        };
+      })
+    : [...hitterVals, ...pitcherVals];
+
+  const targetTotal = numTeams * budget;
+  const normalized = calibrateValuationTotals(withFullPool, targetTotal)
+    .sort((a, b) => {
+      const diff = (Number(b.dollarValue) || 0) - (Number(a.dollarValue) || 0);
+      if (diff !== 0) return diff;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    })
+    .map((v, index) => ({ ...v, rank: index + 1 }));
+
+  return normalized;
 }
 
 /**
@@ -348,6 +478,7 @@ function runValuations(leagueSettings = {}, draftState = {}) {
   // STEP 1: Load all hitter and pitcher stat rows for the target season
   const allHitters  = loadStatRows(season, 'hitting');
   const allPitchers = loadStatRows(season, 'pitching');
+  const allPoolPlayers = loadPlayerPool();
 
   if (!allHitters.length && !allPitchers.length) {
     return { valuations: [], meta: { season, note: 'No player stats found — run import-stats first' } };
@@ -356,13 +487,15 @@ function runValuations(leagueSettings = {}, draftState = {}) {
   // If a live draft is in progress, only value players who haven't been picked yet
   let hitters  = allHitters;
   let pitchers = allPitchers;
+  let poolPlayers = allPoolPlayers;
   if (Array.isArray(draftState.availablePlayerIds) && draftState.availablePlayerIds.length) {
     const avail = new Set(draftState.availablePlayerIds);
     hitters  = hitters.filter((p)  => avail.has(p.player_id));
     pitchers = pitchers.filter((p) => avail.has(p.player_id));
+    poolPlayers = poolPlayers.filter((p) => avail.has(p.playerId));
   }
 
-  const valuations = computeValuations(hitters, pitchers, settings);
+  const valuations = computeValuations(hitters, pitchers, poolPlayers, settings);
 
   const hitterCount  = valuations.filter((v) => v.statGroup === 'hitting').length;
   const pitcherCount = valuations.filter((v) => v.statGroup === 'pitching').length;
@@ -378,6 +511,8 @@ function runValuations(leagueSettings = {}, draftState = {}) {
     pitcherCount,
     totalValue,
     targetTotalValue: settings.numTeams * settings.budget,
+    valuationCount: valuations.length,
+    calibrationError: roundCurrency(totalValue - (settings.numTeams * settings.budget)),
   };
 
   return { valuations, meta };

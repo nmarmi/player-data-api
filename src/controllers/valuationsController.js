@@ -18,27 +18,39 @@ function freshness() {
 }
 
 const DEFAULT_BUDGET       = 260;
-const DEFAULT_ROSTER_SLOTS = 23;
+const DEFAULT_NUM_TEAMS    = 10;
 
 // ── Placeholder (used only when player_stats table is empty) ─────────────────
 
-function placeholderValuations(players, budget, rosterSlots) {
+function placeholderValuations(players, leagueSettings = {}) {
+  if (!Array.isArray(players) || !players.length) return [];
+
+  const budget = Number(leagueSettings.budget) || DEFAULT_BUDGET;
+  const numTeams = Number(leagueSettings.numTeams) || DEFAULT_NUM_TEAMS;
+  const targetTotal = Math.max(0, budget * numTeams);
+
   const sorted = [...players].sort((a, b) => {
     const diff = (b.fpts || 0) - (a.fpts || 0);
     return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '');
   });
 
-  const valuedCount = Math.min(sorted.length, rosterSlots);
-  const weightSum   = (valuedCount * (valuedCount + 1)) / 2;
+  const minFpts = Math.min(...sorted.map((p) => Number(p.fpts) || 0));
+  const weights = sorted.map((p) => Math.max(0, (Number(p.fpts) || 0) - minFpts) + 1);
+  const weightSum = weights.reduce((s, w) => s + w, 0) || 1;
 
-  return sorted.map((player, i) => {
-    const rank = i + 1;
-    const dollarValue =
-      rank <= valuedCount
-        ? Math.max(1, Math.round(((valuedCount - rank + 1) / weightSum) * budget))
-        : 1;
-    return { playerId: player.playerId, dollarValue, projectedValue: dollarValue, rank };
+  const valuations = sorted.map((player, i) => {
+    const rawValue = targetTotal * (weights[i] / weightSum);
+    const dollarValue = Math.round(rawValue * 100) / 100;
+    return { playerId: player.playerId, dollarValue, projectedValue: dollarValue, rank: i + 1 };
   });
+
+  const total = valuations.reduce((s, v) => s + v.dollarValue, 0);
+  const diff = Math.round((targetTotal - total) * 100) / 100;
+  if (diff !== 0 && valuations.length) {
+    valuations[0].dollarValue = Math.round((valuations[0].dollarValue + diff) * 100) / 100;
+    valuations[0].projectedValue = valuations[0].dollarValue;
+  }
+  return valuations;
 }
 
 // ── Controller ────────────────────────────────────────────────────────────────
@@ -53,6 +65,12 @@ function getValuations(req, res) {
     (isNaN(Number(leagueSettings.budget)) || Number(leagueSettings.budget) <= 0)
   ) {
     errors.push({ field: 'leagueSettings.budget', message: 'Must be a positive number' });
+  }
+  if (
+    leagueSettings.numTeams !== undefined &&
+    (isNaN(Number(leagueSettings.numTeams)) || Number(leagueSettings.numTeams) <= 0)
+  ) {
+    errors.push({ field: 'leagueSettings.numTeams', message: 'Must be a positive number' });
   }
   if (
     leagueSettings.rosterSlots !== undefined &&
@@ -90,8 +108,6 @@ function getValuations(req, res) {
   }
 
   // Placeholder fallback
-  const budget      = Number(leagueSettings.budget)      || DEFAULT_BUDGET;
-  const rosterSlots = Number(leagueSettings.rosterSlots) || DEFAULT_ROSTER_SLOTS;
   const { availablePlayerIds } = draftState;
 
   let players = loadPlayers();
@@ -100,11 +116,20 @@ function getValuations(req, res) {
     players = players.filter((p) => idSet.has(p.playerId));
   }
 
-  const valuations = placeholderValuations(players, budget, rosterSlots);
+  const valuations = placeholderValuations(players, leagueSettings);
+  const totalValue = valuations.reduce((s, v) => s + (v.dollarValue || 0), 0);
+  const numTeams = Number(leagueSettings.numTeams) || DEFAULT_NUM_TEAMS;
+  const budget = Number(leagueSettings.budget) || DEFAULT_BUDGET;
   return res.json({
     success:    true,
     valuations,
-    meta:       { note: 'Placeholder valuations — run import-stats to enable the full model' },
+    meta:       {
+      note: 'Placeholder valuations — run import-stats to enable the full model',
+      valuationCount: valuations.length,
+      totalValue,
+      targetTotalValue: numTeams * budget,
+      calibrationError: Math.round((totalValue - (numTeams * budget)) * 100) / 100,
+    },
     ...freshness(),
   });
 }
