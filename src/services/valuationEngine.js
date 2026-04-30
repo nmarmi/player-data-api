@@ -645,6 +645,93 @@ function parseRosterSlotsConfig(leagueSettings = {}) {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+// Positions that map to the hitter budget bucket
+const HITTER_POSITIONS_SET  = new Set(['C', '1B', '2B', '3B', 'SS', 'OF', 'UTIL', 'DH']);
+// Positions that map to the pitcher budget bucket
+const PITCHER_POSITIONS_SET = new Set(['SP', 'RP', 'P']);
+
+/**
+ * Converts the Draft Kit leagueSettings shape to the engine's internal shape.
+ * Also accepts the legacy engine shape directly (pass-through).
+ *
+ * Draft Kit shape:
+ *   { numberOfTeams, salaryCap, rosterSlots: { C:2, "1B":1, … }, scoringType, draftType }
+ *
+ * Engine (legacy) shape:
+ *   { numTeams, budget, hitterSlotsPerTeam, pitcherSlotsPerTeam, hittingCategories, … }
+ *
+ * When both shapes are present, legacy engine fields take precedence so internal
+ * callers can still override individual values.
+ */
+function normalizeLeagueSettings(input = {}) {
+  const out = { ...input };
+
+  // numberOfTeams → numTeams (only when legacy field absent)
+  if (input.numberOfTeams !== undefined && input.numTeams === undefined) {
+    out.numTeams = Number(input.numberOfTeams);
+  }
+
+  // salaryCap → budget (only when legacy field absent)
+  if (input.salaryCap !== undefined && input.budget === undefined) {
+    out.budget = Number(input.salaryCap);
+  }
+
+  // rosterSlots map → hitterSlotsPerTeam / pitcherSlotsPerTeam
+  // Only applied when the legacy slot fields are absent to allow explicit overrides.
+  if (
+    input.rosterSlots &&
+    typeof input.rosterSlots === 'object' &&
+    !Array.isArray(input.rosterSlots) &&
+    input.hitterSlotsPerTeam  === undefined &&
+    input.pitcherSlotsPerTeam === undefined
+  ) {
+    let hitterSlots  = 0;
+    let pitcherSlots = 0;
+    let benchCount   = 0;
+
+    for (const [pos, count] of Object.entries(input.rosterSlots)) {
+      const posKey = String(pos).toUpperCase();
+      const n = Number(count) || 0;
+      if (posKey === 'BENCH') {
+        benchCount += n;
+      } else if (HITTER_POSITIONS_SET.has(posKey)) {
+        hitterSlots += n;
+      } else if (PITCHER_POSITIONS_SET.has(posKey)) {
+        pitcherSlots += n;
+      } else {
+        console.warn(`[normalizeLeagueSettings] Unknown position key "${pos}" — ignored`);
+      }
+    }
+
+    // Distribute BENCH slots proportionally to the hitter/pitcher ratio already found.
+    // If no other slots are defined yet, default to a 70/30 hitter/pitcher split.
+    if (benchCount > 0) {
+      const knownTotal = hitterSlots + pitcherSlots;
+      const hitterBenchShare = knownTotal > 0
+        ? Math.round(benchCount * (hitterSlots / knownTotal))
+        : Math.round(benchCount * 0.7);
+      hitterSlots  += hitterBenchShare;
+      pitcherSlots += benchCount - hitterBenchShare;
+    }
+
+    if (hitterSlots  > 0) out.hitterSlotsPerTeam  = hitterSlots;
+    if (pitcherSlots > 0) out.pitcherSlotsPerTeam = pitcherSlots;
+  }
+
+  // scoringType → category presets (only when hittingCategories not already overridden)
+  if (input.scoringType && !input.hittingCategories) {
+    if (input.scoringType === 'Points') {
+      // Points leagues use a single composite fantasy-points category
+      out.hittingCategories  = ['fpts'];
+      out.pitchingCategories = ['fpts'];
+    }
+    // '5x5 Roto' and 'H2H Categories' both map to the default 5x5 categories,
+    // so no override is needed — DEFAULTS in mergeSettings handle them.
+  }
+
+  return out;
+}
+
 /**
  * Merges caller-supplied league settings with defaults.
  * Numeric string values are coerced to numbers.
@@ -848,4 +935,13 @@ function runValuations(leagueSettings = {}, draftState = {}) {
   return { valuations, meta };
 }
 
-module.exports = { runValuations, computeValuations, mergeSettings, loadStatRows, DEFAULTS };
+module.exports = {
+  runValuations,
+  computeValuations,
+  mergeSettings,
+  normalizeLeagueSettings,
+  loadStatRows,
+  DEFAULTS,
+  HITTER_POSITIONS_SET,
+  PITCHER_POSITIONS_SET,
+};

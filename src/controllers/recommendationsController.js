@@ -1,67 +1,111 @@
-const { loadPlayers } = require('../services/playersService');
-const { computeValuations } = require('./valuationsController');
-
-const DEFAULT_BUDGET = 260;
-const DEFAULT_ROSTER_SLOTS = 23;
+'use strict';
 
 /**
- * Placeholder recommendation logic:
- * 1. Compute placeholder dollar values for all available players (reuses valuation logic).
- * 2. Compare each player's dollarValue against the market price (default $1 if unknown).
- * 3. Recommend players where dollarValue > marketPrice (value above cost).
- * 4. Sort by value surplus descending.
+ * Recommendation engine — Epic 6
+ *
+ * US-6.1  getRecommendations  POST /players/recommendations
+ *   Returns top N available players ranked by projected value with tier labels.
+ *   Delegates to the real valuation engine (US-5.4) for all value computation.
+ *   Accepts the Draft Kit leagueSettings shape via normalizeLeagueSettings (US-5.3).
  */
-function getRecommendations(req, res) {
-  const { leagueSettings = {}, draftState = {}, teamId } = req.body || {};
 
-  const validationErrors = [];
-  if (leagueSettings.budget !== undefined && (isNaN(Number(leagueSettings.budget)) || Number(leagueSettings.budget) <= 0)) {
-    validationErrors.push({ field: 'leagueSettings.budget', message: 'Must be a positive number' });
-  }
-  if (leagueSettings.rosterSlots !== undefined && (isNaN(Number(leagueSettings.rosterSlots)) || Number(leagueSettings.rosterSlots) <= 0)) {
-    validationErrors.push({ field: 'leagueSettings.rosterSlots', message: 'Must be a positive number' });
-  }
+const { runValuations, normalizeLeagueSettings } = require('../services/valuationEngine');
+
+// ── Tier thresholds (returned in every response so the client never re-computes) ──
+const BUY_ABOVE   = 15;   // $15+ projected value → "buy"
+const AVOID_BELOW =  5;   // $5 or less            → "avoid"
+// $6–$14 → "fair"
+
+const DEFAULT_LIMIT = 30;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function tierFor(dollarValue) {
+  if (dollarValue >= BUY_ABOVE)   return 'buy';
+  if (dollarValue <= AVOID_BELOW) return 'avoid';
+  return 'fair';
+}
+
+function buildReason(dollarValue, tier) {
+  if (tier === 'buy')  return `Elite target at $${dollarValue} — top fantasy contributor`;
+  if (tier === 'fair') return `Solid value at $${dollarValue} — reliable contributor`;
+  return `Limited upside at $${dollarValue} — replacement-level player`;
+}
+
+function validateBody(body) {
+  const { draftState = {} } = body;
+  const errors = [];
+
   if (draftState.availablePlayerIds !== undefined && !Array.isArray(draftState.availablePlayerIds)) {
-    validationErrors.push({ field: 'draftState.availablePlayerIds', message: 'Must be an array' });
+    errors.push({ field: 'draftState.availablePlayerIds', message: 'Must be an array' });
   }
-  if (draftState.marketPrices !== undefined && (typeof draftState.marketPrices !== 'object' || Array.isArray(draftState.marketPrices))) {
-    validationErrors.push({ field: 'draftState.marketPrices', message: 'Must be an object mapping playerId to price' });
+  if (draftState.purchasedPlayers !== undefined && !Array.isArray(draftState.purchasedPlayers)) {
+    errors.push({ field: 'draftState.purchasedPlayers', message: 'Must be an array' });
   }
-  if (validationErrors.length) {
-    return res.status(400).json({ success: false, error: 'Invalid request body', code: 'BAD_REQUEST', fields: validationErrors });
+  if (
+    draftState.teamBudgets !== undefined &&
+    (typeof draftState.teamBudgets !== 'object' || Array.isArray(draftState.teamBudgets))
+  ) {
+    errors.push({ field: 'draftState.teamBudgets', message: 'Must be an object' });
+  }
+  return { errors };
+}
+
+// ── US-6.1: Best available recommendations ────────────────────────────────────
+
+function getRecommendations(req, res) {
+  const body = req.body || {};
+  const { leagueSettings = {}, draftState = {}, teamId } = body;
+  const limit = Math.min(Math.max(1, parseInt(body.limit, 10) || DEFAULT_LIMIT), 200);
+
+  const { errors } = validateBody(body);
+  if (errors.length) {
+    return res.status(400).json({
+      success: false, error: 'Invalid request body', code: 'BAD_REQUEST', fields: errors,
+    });
   }
 
-  const budget = Number(leagueSettings.budget) || DEFAULT_BUDGET;
-  const rosterSlots = Number(leagueSettings.rosterSlots) || DEFAULT_ROSTER_SLOTS;
-  const { availablePlayerIds, marketPrices = {} } = draftState;
+  // Normalise the Draft Kit leagueSettings shape before passing to the engine
+  const normalizedSettings = normalizeLeagueSettings(leagueSettings);
 
-  let players = loadPlayers();
-
-  if (Array.isArray(availablePlayerIds) && availablePlayerIds.length) {
-    const idSet = new Set(availablePlayerIds);
-    players = players.filter((p) => idSet.has(p.playerId));
+  let valuations, meta;
+  try {
+    ({ valuations, meta } = runValuations(normalizedSettings, draftState));
+  } catch (err) {
+    console.error('[recommendations] Engine error:', err.message);
+    return res.status(500).json({
+      success: false, error: 'Failed to compute recommendations', code: 'ENGINE_ERROR',
+    });
   }
 
-  const valuations = computeValuations(players, budget, rosterSlots);
+  const thresholds = { buyAbove: BUY_ABOVE, avoidBelow: AVOID_BELOW };
 
-  const recommendations = valuations
-    .map((v) => {
-      const marketPrice = Number(marketPrices[v.playerId]) || 1;
-      const surplus = v.dollarValue - marketPrice;
-      return {
-        playerId: v.playerId,
-        recommendedBid: v.dollarValue,
-        reason: surplus > 0
-          ? `Valued at $${v.dollarValue} vs market $${marketPrice} (+$${surplus} surplus)`
-          : `At or below market value ($${v.dollarValue})`,
-        surplus,
-      };
-    })
-    .filter((r) => r.surplus > 0)
-    .sort((a, b) => b.surplus - a.surplus)
-    .map(({ surplus, ...r }) => r);
+  if (!valuations.length) {
+    return res.json({
+      success: true, recommendations: [], thresholds, meta: meta || {}, teamId: teamId || null,
+    });
+  }
 
-  res.json({ success: true, recommendations, teamId: teamId || null });
+  const recommendations = valuations.slice(0, limit).map((v, i) => {
+    const tier = tierFor(v.dollarValue);
+    return {
+      playerId:       v.playerId,
+      name:           v.name,
+      projectedValue: v.projectedValue,
+      recommendedBid: v.dollarValue,
+      rank:           i + 1,
+      tier,
+      reason:         buildReason(v.dollarValue, tier),
+    };
+  });
+
+  res.json({
+    success:         true,
+    recommendations,
+    thresholds,
+    meta:            meta || {},
+    teamId:          teamId || null,
+  });
 }
 
 module.exports = { getRecommendations };
