@@ -2,11 +2,13 @@
  * POST /players/valuations
  *
  * US-5.1: Delegates to the z-score above replacement valuation engine.
- * Falls back to the ranking-based placeholder when no player_stats rows
- * exist (e.g. before import-stats has been run).
+ * US-5.3: Accepts both the Draft Kit leagueSettings shape (numberOfTeams,
+ *   salaryCap, rosterSlots map, scoringType) and the legacy engine shape
+ *   (numTeams, budget, …) via normalizeLeagueSettings.
+ * Falls back to a ranking-based placeholder when no player_stats rows exist.
  */
 
-const { runValuations }         = require('../services/valuationEngine');
+const { runValuations, normalizeLeagueSettings } = require('../services/valuationEngine');
 const { loadPlayers }           = require('../services/playersService');
 const { getDataFreshnessMeta }  = require('../db/syncLog');
 
@@ -58,18 +60,18 @@ function placeholderValuations(players, leagueSettings = {}) {
 function getValuations(req, res) {
   const { leagueSettings = {}, draftState = {} } = req.body || {};
 
-  // Input validation
+  // ── Input validation ──────────────────────────────────────────────────────
+  // Accept both Draft Kit shape (salaryCap / numberOfTeams) and legacy engine
+  // shape (budget / numTeams).  Both are validated under the same rules.
   const errors = [];
-  if (
-    leagueSettings.budget !== undefined &&
-    (isNaN(Number(leagueSettings.budget)) || Number(leagueSettings.budget) <= 0)
-  ) {
+
+  const budgetVal    = leagueSettings.budget    ?? leagueSettings.salaryCap;
+  const numTeamsVal  = leagueSettings.numTeams  ?? leagueSettings.numberOfTeams;
+
+  if (budgetVal !== undefined && (isNaN(Number(budgetVal)) || Number(budgetVal) <= 0)) {
     errors.push({ field: 'leagueSettings.budget', message: 'Must be a positive number' });
   }
-  if (
-    leagueSettings.numTeams !== undefined &&
-    (isNaN(Number(leagueSettings.numTeams)) || Number(leagueSettings.numTeams) <= 0)
-  ) {
+  if (numTeamsVal !== undefined && (isNaN(Number(numTeamsVal)) || Number(numTeamsVal) <= 0)) {
     errors.push({ field: 'leagueSettings.numTeams', message: 'Must be a positive number' });
   }
   if (leagueSettings.rosterSlots !== undefined) {
@@ -83,15 +85,21 @@ function getValuations(req, res) {
     if (!isPositiveNumber && !isPositionMap) {
       errors.push({
         field: 'leagueSettings.rosterSlots',
-        message: 'Must be a positive number or an object map of position->slotCount',
+        message: 'Must be a positive number or an object map of position→slotCount',
       });
     }
   }
-  if (
-    draftState.availablePlayerIds !== undefined &&
-    !Array.isArray(draftState.availablePlayerIds)
-  ) {
+  if (draftState.availablePlayerIds !== undefined && !Array.isArray(draftState.availablePlayerIds)) {
     errors.push({ field: 'draftState.availablePlayerIds', message: 'Must be an array' });
+  }
+  if (draftState.purchasedPlayers !== undefined && !Array.isArray(draftState.purchasedPlayers)) {
+    errors.push({ field: 'draftState.purchasedPlayers', message: 'Must be an array' });
+  }
+  if (
+    draftState.teamBudgets !== undefined &&
+    (typeof draftState.teamBudgets !== 'object' || Array.isArray(draftState.teamBudgets))
+  ) {
+    errors.push({ field: 'draftState.teamBudgets', message: 'Must be an object mapping teamId to remaining budget' });
   }
   if (errors.length) {
     return res.status(400).json({
@@ -99,9 +107,12 @@ function getValuations(req, res) {
     });
   }
 
+  // US-5.3: normalise the Draft Kit leagueSettings shape before passing to the engine
+  const normalizedSettings = normalizeLeagueSettings(leagueSettings);
+
   // Try the real valuation engine first
   try {
-    const { valuations, meta } = runValuations(leagueSettings, draftState);
+    const { valuations, meta } = runValuations(normalizedSettings, draftState);
 
     if (valuations.length > 0) {
       return res.json({
@@ -125,10 +136,10 @@ function getValuations(req, res) {
     players = players.filter((p) => idSet.has(p.playerId));
   }
 
-  const valuations = placeholderValuations(players, leagueSettings);
+  const valuations = placeholderValuations(players, normalizedSettings);
   const totalValue = valuations.reduce((s, v) => s + (v.dollarValue || 0), 0);
-  const numTeams = Number(leagueSettings.numTeams) || DEFAULT_NUM_TEAMS;
-  const budget = Number(leagueSettings.budget) || DEFAULT_BUDGET;
+  const numTeams = Number(normalizedSettings.numTeams) || DEFAULT_NUM_TEAMS;
+  const budget = Number(normalizedSettings.budget) || DEFAULT_BUDGET;
   return res.json({
     success:    true,
     valuations,
