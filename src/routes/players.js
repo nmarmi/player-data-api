@@ -5,6 +5,7 @@ const { getValuations } = require('../controllers/valuationsController');
 const {
   getRecommendations,
   getNominations,
+  getBudgetStrategy,
 } = require('../controllers/recommendationsController');
 
 const router = express.Router();
@@ -14,6 +15,7 @@ router.get('/pool', requireLicense, getPlayerPool);
 router.post('/valuations', requireLicense, getValuations);
 // More-specific sub-routes must come before the base /recommendations route
 router.post('/recommendations/nominations', requireLicense, getNominations);
+router.post('/recommendations/budget', requireLicense, getBudgetStrategy);
 router.post('/recommendations', requireLicense, getRecommendations);
 router.get('/:playerId', requireLicense, getPlayerById);
 router.get('/', requireLicense, listPlayers);

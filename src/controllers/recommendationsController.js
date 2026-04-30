@@ -299,4 +299,109 @@ function getNominations(req, res) {
   res.json({ success: true, nominations, meta: meta || {}, teamId });
 }
 
-module.exports = { getRecommendations, getNominations };
+// ── US-6.4: Budget strategy ───────────────────────────────────────────────────
+
+/**
+ * POST /players/recommendations/budget
+ *
+ * Returns a per-position suggested spend allocation across the requesting
+ * team's remaining open roster slots.
+ *
+ * Algorithm (documented per US-6.4):
+ *   1. Derive open slots per position from filledRosterSlots[teamId] vs
+ *      leagueSettings.rosterSlots.
+ *   2. For each open position, find the top-openSlots available players
+ *      from the valuation pool.
+ *   3. suggestedSpend = min(idealSpend, proportionalCap) where:
+ *        idealSpend      = sum of projected values for the slots to fill
+ *        proportionalCap = remainingBudget × (openSlots[pos] / totalOpenSlots)
+ *      This ensures suggested spend never exceeds the team's remaining budget
+ *      and each position gets a proportional share of available funds.
+ *   4. topTargets (up to 3) returned per position for display context.
+ *      Stateless — each call reflects the draftState snapshot in the request.
+ *
+ * teamId is required; returns 400/UNKNOWN_TEAM if absent from teamBudgets.
+ */
+function getBudgetStrategy(req, res) {
+  const body = req.body || {};
+  const { leagueSettings = {}, draftState = {}, teamId } = body;
+
+  if (!teamId) {
+    return res.status(400).json({
+      success: false,
+      error:   'teamId is required for budget strategy',
+      code:    'BAD_REQUEST',
+      fields:  [{ field: 'teamId', message: 'Required' }],
+    });
+  }
+
+  const { errors, teamError } = validateBody(body);
+  if (teamError) return res.status(400).json(teamError);
+  if (errors && errors.length) {
+    return res.status(400).json({
+      success: false, error: 'Invalid request body', code: 'BAD_REQUEST', fields: errors,
+    });
+  }
+
+  const normalizedSettings = normalizeLeagueSettings(leagueSettings);
+
+  let valuations, meta;
+  try {
+    ({ valuations, meta } = runValuations(normalizedSettings, draftState));
+  } catch (err) {
+    console.error('[budget-strategy] Engine error:', err.message);
+    return res.status(500).json({
+      success: false, error: 'Failed to compute budget strategy', code: 'ENGINE_ERROR',
+    });
+  }
+
+  const remainingBudget = Number((draftState.teamBudgets || {})[teamId] || 0);
+  const slotState       = getTeamSlotState(teamId, draftState, leagueSettings);
+  const totalOpenSlots  = Object.values(slotState.open).reduce((s, n) => s + n, 0);
+
+  if (totalOpenSlots === 0 || !valuations.length) {
+    return res.json({
+      success: true, allocations: [], remainingBudget, meta: meta || {}, teamId,
+    });
+  }
+
+  const allocations = Object.entries(slotState.open)
+    .filter(([, openCount]) => openCount > 0)
+    .map(([pos, openCount]) => {
+      // Players eligible for this position, best value first
+      const eligible = valuations.filter((v) =>
+        (v.positions || []).some((p) => String(p).toUpperCase() === pos)
+      );
+
+      // Players needed to fill open slots (for spend calculation)
+      const toFill  = eligible.slice(0, openCount);
+      // Up to 3 for display
+      const display = eligible.slice(0, 3);
+
+      const idealSpend       = toFill.reduce((s, v) => s + v.dollarValue, 0);
+      const proportionalCap  = Math.round(remainingBudget * (openCount / totalOpenSlots));
+      const suggestedSpend   = Math.min(idealSpend, proportionalCap);
+
+      return {
+        position:      pos,
+        openSlots:     openCount,
+        suggestedSpend,
+        topTargets:    display.map((v) => ({
+          playerId:       v.playerId,
+          name:           v.name,
+          projectedValue: v.projectedValue,
+        })),
+      };
+    })
+    .sort((a, b) => b.suggestedSpend - a.suggestedSpend);
+
+  res.json({
+    success:         true,
+    allocations,
+    remainingBudget,
+    meta:            meta || {},
+    teamId,
+  });
+}
+
+module.exports = { getRecommendations, getNominations, getBudgetStrategy };
