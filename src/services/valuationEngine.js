@@ -1053,7 +1053,29 @@ function runValuations(leagueSettings = {}, draftState = {}) {
   // US-5.4: override budget and positional demand when live draft state is present
   const effectiveSettings = applyDraftStateOverrides(settings, draftState, leagueSettings);
 
-  const valuations = computeValuations(hitters, pitchers, poolPlayers, effectiveSettings);
+  const rawValuations = computeValuations(hitters, pitchers, poolPlayers, effectiveSettings);
+
+  // US-5.5: Annotate each valuation with purchasePrice and valueGap.
+  // purchasePrice is resolved server-side from draftState.purchasedPlayers —
+  // the client does NOT send it as a separate field in the request.
+  const purchasedMap = new Map();
+  if (Array.isArray(draftState.purchasedPlayers)) {
+    for (const pp of draftState.purchasedPlayers) {
+      if (pp && pp.playerId) purchasedMap.set(pp.playerId, Number(pp.price) || 0);
+    }
+  }
+
+  const valuations = rawValuations.map((v) => {
+    if (purchasedMap.has(v.playerId)) {
+      const purchasePrice = purchasedMap.get(v.playerId);
+      return {
+        ...v,
+        purchasePrice,
+        valueGap: Math.round((v.projectedValue - purchasePrice) * 100) / 100,
+      };
+    }
+    return { ...v, purchasePrice: null, valueGap: null };
+  });
 
   const hitterCount  = valuations.filter((v) => v.statGroup === 'hitting').length;
   const pitcherCount = valuations.filter((v) => v.statGroup === 'pitching').length;
