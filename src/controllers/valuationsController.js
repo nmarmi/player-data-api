@@ -8,7 +8,11 @@
  * Falls back to a ranking-based placeholder when no player_stats rows exist.
  */
 
-const { runValuations, normalizeLeagueSettings } = require('../services/valuationEngine');
+const {
+  runValuations,
+  normalizeLeagueSettings,
+  getExclusionDiagnostics,
+} = require('../services/valuationEngine');
 const { loadPlayers }           = require('../services/playersService');
 const { getDataFreshnessMeta }  = require('../db/syncLog');
 
@@ -59,6 +63,14 @@ function placeholderValuations(players, leagueSettings = {}) {
 
 function getValuations(req, res) {
   const { leagueSettings = {}, draftState = {} } = req.body || {};
+  const query = req.query || {};
+  const debugExclusions = query.debugExclusions === 'true' || req.body?.debugExclusions === true;
+  const debugPlayerIdsRaw = query.debugPlayerIds || req.body?.debugPlayerIds || req.body?.debugPlayerId;
+  const debugPlayerIds = Array.isArray(debugPlayerIdsRaw)
+    ? debugPlayerIdsRaw
+    : (typeof debugPlayerIdsRaw === 'string' && debugPlayerIdsRaw.trim()
+      ? debugPlayerIdsRaw.split(',').map((v) => v.trim()).filter(Boolean)
+      : []);
 
   // ── Input validation ──────────────────────────────────────────────────────
   // Accept both Draft Kit shape (salaryCap / numberOfTeams) and legacy engine
@@ -115,10 +127,14 @@ function getValuations(req, res) {
     const { valuations, meta } = runValuations(normalizedSettings, draftState);
 
     if (valuations.length > 0) {
+      const debug = debugExclusions
+        ? getExclusionDiagnostics(normalizedSettings, draftState, { playerIds: debugPlayerIds })
+        : null;
       return res.json({
         success: true,
         valuations,
         meta,
+        ...(debug ? { debug } : {}),
         ...freshness(),
       });
     }
@@ -150,6 +166,9 @@ function getValuations(req, res) {
       targetTotalValue: numTeams * budget,
       calibrationError: Math.round((totalValue - (numTeams * budget)) * 100) / 100,
     },
+    ...(debugExclusions ? {
+      debug: getExclusionDiagnostics(normalizedSettings, draftState, { playerIds: debugPlayerIds }),
+    } : {}),
     ...freshness(),
   });
 }

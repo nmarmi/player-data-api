@@ -1124,8 +1124,69 @@ function runValuations(leagueSettings = {}, draftState = {}) {
   return { valuations, meta };
 }
 
+function getExclusionDiagnostics(leagueSettings = {}, draftState = {}, opts = {}) {
+  const settings = mergeSettings(leagueSettings);
+  const season = settings.statSeason || (new Date().getFullYear() - 1);
+  const targetIds = Array.isArray(opts.playerIds) ? opts.playerIds.filter(Boolean) : [];
+
+  const allHitters = loadStatRows(season, 'hitting');
+  const allPitchers = loadStatRows(season, 'pitching');
+  const allPoolPlayers = loadPlayerPool();
+
+  const purchasedIds = new Set(
+    Array.isArray(draftState.purchasedPlayers)
+      ? draftState.purchasedPlayers.map((pp) => pp && pp.playerId).filter(Boolean)
+      : []
+  );
+  const hasAvailFilter = Array.isArray(draftState.availablePlayerIds) && draftState.availablePlayerIds.length > 0;
+  const availableIds = new Set(hasAvailFilter ? draftState.availablePlayerIds : []);
+
+  const hitterById = new Map();
+  for (const row of allHitters) {
+    if (!hitterById.has(row.player_id)) hitterById.set(row.player_id, []);
+    hitterById.get(row.player_id).push(row);
+  }
+  const pitcherById = new Map();
+  for (const row of allPitchers) {
+    if (!pitcherById.has(row.player_id)) pitcherById.set(row.player_id, []);
+    pitcherById.get(row.player_id).push(row);
+  }
+  const poolById = new Map(allPoolPlayers.map((p) => [p.playerId, p]));
+
+  const idsToCheck = targetIds.length ? targetIds : [...poolById.keys()];
+
+  const players = idsToCheck.map((playerId) => {
+    const reasons = [];
+    const hitterRows = hitterById.get(playerId) || [];
+    const pitcherRows = pitcherById.get(playerId) || [];
+
+    if (!poolById.has(playerId)) reasons.push('not_in_player_pool');
+    if (!hitterRows.length && !pitcherRows.length) reasons.push('missing_stats_for_season');
+    if (purchasedIds.has(playerId)) reasons.push('purchased');
+    if (hasAvailFilter && !availableIds.has(playerId)) reasons.push('not_in_availablePlayerIds');
+
+    const hasQualifiedHitting = hitterRows.some((r) => (r.ab ?? 0) >= settings.minAB);
+    const hasQualifiedPitching = pitcherRows.some((r) => (r.ip ?? 0) >= settings.minIP);
+    if (hitterRows.length && !hasQualifiedHitting) reasons.push(`below_minAB_${settings.minAB}`);
+    if (pitcherRows.length && !hasQualifiedPitching) reasons.push(`below_minIP_${settings.minIP}`);
+    if (!hasQualifiedHitting && !hasQualifiedPitching && (hitterRows.length || pitcherRows.length)) {
+      reasons.push('unscored_profile');
+    }
+
+    return {
+      playerId,
+      name: poolById.get(playerId)?.name || hitterRows[0]?.name || pitcherRows[0]?.name || null,
+      includedInResults: reasons.length === 0 || (reasons.length === 1 && reasons[0] === 'unscored_profile'),
+      reasons,
+    };
+  });
+
+  return { season, players };
+}
+
 module.exports = {
   runValuations,
+  getExclusionDiagnostics,
   computeValuations,
   mergeSettings,
   normalizeLeagueSettings,

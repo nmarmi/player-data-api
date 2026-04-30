@@ -360,4 +360,28 @@ describe('US-7.4 integration tests for API endpoints', () => {
     const lowAvg = overlap.reduce((s, id) => s + lowById.get(id), 0) / overlap.length;
     expect(lowAvg).toBeLessThan(highAvg);
   });
+
+  test('debug exclusions: valuations can explain why a player is excluded', async () => {
+    const out = await auth(
+      request(app)
+        .post('/api/v1/players/valuations?debugExclusions=true&debugPlayerIds=mlb-592450')
+        .send({
+          leagueSettings: buildDraftKitLeagueSettings(),
+          draftState: {
+            purchasedPlayers: [{ playerId: 'mlb-592450', price: 44 }],
+            teamBudgets: { t1: 200, t2: 180 },
+          },
+        })
+    );
+
+    expect(out.status).toBe(200);
+    expect(out.body.success).toBe(true);
+    expect(out.body.debug).toBeTruthy();
+    expect(Array.isArray(out.body.debug.players)).toBe(true);
+    expect(out.body.debug.players.length).toBe(1);
+    expect(out.body.debug.players[0]).toEqual(expect.objectContaining({
+      playerId: 'mlb-592450',
+      reasons: expect.arrayContaining(['purchased']),
+    }));
+  });
 });
