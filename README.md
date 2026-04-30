@@ -106,11 +106,31 @@ Expected CSV columns: `Player,AB,R,H,1B,2B,3B,HR,RBI,BB,K,SB,CS,AVG,OBP,SLG,FPTS
 
 ## Demo UI
 
-Open `http://localhost:4001` (or `/demo.html`) to use the built-in front end:
+Live at **https://player-data-api.vercel.app** — or run locally at `http://localhost:4001`.
 
-1. **License check** — GET /license/check with your API key
+1. **License check** — validates your API key
 2. **Pull players** — search, filter, and sort the full player list
-3. **Push usage** — POST /usage with a sample event
+3. **Push usage** — logs a sample event
+4. **Valuations** — runs the z-score auction engine for your league settings
+
+## Deployment
+
+The API runs as two separate services:
+
+| Layer | Platform | Purpose |
+|---|---|---|
+| Backend (Express + SQLite + scheduler) | [Render](https://render.com) | Always-on, persistent disk for `players.db` |
+| Demo frontend (`public/`) | [Vercel](https://vercel.com) | Static site; proxies `/api/*` to Render |
+
+**Vercel** serves `public/` as a static site and transparently proxies all `/api/*` requests to the Render service (configured in `vercel.json`). The browser only ever talks to the Vercel domain — no CORS config needed for the demo UI, and cookie-based auth (planned) works without cross-origin issues.
+
+**Render** is configured via `render.yaml`. On first deploy, the DB is created at `/data/players.db`, seeded from `data/players.json`, and the scheduler immediately ingests fresh data from the MLB Stats API. The disk at `/data` persists across redeploys.
+
+To deploy:
+1. Connect the repo to Render — it auto-detects `render.yaml`. Set `API_LICENSE_KEY` and `ADMIN_KEY` in the Render dashboard.
+2. Connect the repo to Vercel — it auto-detects `outputDirectory: "public"` in `vercel.json`. No env vars needed.
+
+**External apps** (non-browser) should call the Render service URL directly: `https://player-data-api.onrender.com`.
 
 ## Project structure
 
@@ -131,20 +151,26 @@ src/
     syncLog.js              data_sync_log table helpers
   middleware/
     license.js              requireLicense / requireAdmin middleware
+public/
+  index.html                Demo UI shell
+  app.jsx                   React demo app (no build step; Babel CDN)
+  styles.css                Demo UI styles
 data/
   players.db                SQLite database (primary store)
   players.json              Seed/fallback player list
 tests/
   *.test.js                 Jest test suites
   fixtures/                 Draft-state snapshots for integration tests
-api/
-  index.js                  Vercel serverless entrypoint
+render.yaml                 Render service definition
+vercel.json                 Vercel static site + /api/* proxy config
 ```
 
 ## Connecting the draft kit
 
+External apps call the Render service directly (bypasses Vercel):
+
 In the draft kit repo, set:
-- `PLAYER_API_URL` — e.g. `http://localhost:4001` or your Vercel URL
+- `PLAYER_API_URL` — `https://player-data-api.onrender.com` (or `http://localhost:4001` for local dev)
 - `PLAYER_API_KEY` — your license key
 
 Then:
