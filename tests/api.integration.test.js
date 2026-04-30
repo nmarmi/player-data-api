@@ -246,4 +246,118 @@ describe('US-7.4 integration tests for API endpoints', () => {
     expect(legacy.body.recommendations.length).toBe(versioned.body.recommendations.length);
     expect(legacy.body.thresholds).toEqual(versioned.body.thresholds);
   });
+
+  test('US-7.5: sequential draft-state transitions update valuations and recommendations', async () => {
+    const leagueSettings = buildDraftKitLeagueSettings();
+
+    const initialVals = await auth(
+      request(app)
+        .post('/api/v1/players/valuations')
+        .send({
+          leagueSettings,
+          draftState: {
+            teamBudgets: { t1: 260, t2: 260 },
+            filledRosterSlots: { t1: {}, t2: {} },
+          },
+        })
+    );
+    expect(initialVals.status).toBe(200);
+    expect(initialVals.body.success).toBe(true);
+    expect(initialVals.body.valuations.length).toBeGreaterThan(20);
+
+    const purchased = initialVals.body.valuations.slice(0, 3).map((v, i) => ({
+      playerId: v.playerId,
+      price: [45, 35, 30][i] || 25,
+    }));
+    const purchasedIds = new Set(purchased.map((p) => p.playerId));
+
+    const afterDraftVals = await auth(
+      request(app)
+        .post('/api/v1/players/valuations')
+        .send({
+          leagueSettings,
+          draftState: {
+            purchasedPlayers: purchased,
+            teamBudgets: { t1: 180, t2: 170 },
+            filledRosterSlots: {
+              t1: { OF: 1, SP: 1, C: 1 },
+              t2: { OF: 1, RP: 1 },
+            },
+          },
+        })
+    );
+    expect(afterDraftVals.status).toBe(200);
+    expect(afterDraftVals.body.success).toBe(true);
+
+    // Purchased players should be excluded from subsequent valuations.
+    const postIds = new Set(afterDraftVals.body.valuations.map((v) => v.playerId));
+    for (const id of purchasedIds) {
+      expect(postIds.has(id)).toBe(false);
+    }
+
+    // As pool shrinks and budgets drop, remaining player values should shift.
+    const remainingBefore = initialVals.body.valuations.find((v) => !purchasedIds.has(v.playerId));
+    const remainingAfter = afterDraftVals.body.valuations.find((v) => v.playerId === remainingBefore.playerId);
+    expect(remainingAfter).toBeTruthy();
+    expect(remainingAfter.projectedValue).not.toBe(remainingBefore.projectedValue);
+
+    const recHighBudget = await auth(
+      request(app)
+        .post('/api/v1/players/recommendations')
+        .send({
+          leagueSettings,
+          draftState: {
+            purchasedPlayers: purchased,
+            teamBudgets: { t1: 180, t2: 170 },
+            filledRosterSlots: {
+              t1: { OF: 1, SP: 1, C: 1 },
+              t2: { OF: 1, RP: 1 },
+            },
+          },
+          teamId: 't1',
+          limit: 10,
+        })
+    );
+    expect(recHighBudget.status).toBe(200);
+    expect(recHighBudget.body.success).toBe(true);
+    expect(recHighBudget.body.meta).toEqual(expect.objectContaining({
+      targetTotalValue: expect.any(Number),
+      draftBudget: expect.any(Object),
+    }));
+
+    const recLowBudget = await auth(
+      request(app)
+        .post('/api/v1/players/recommendations')
+        .send({
+          leagueSettings,
+          draftState: {
+            purchasedPlayers: purchased,
+            teamBudgets: { t1: 120, t2: 110 },
+            filledRosterSlots: {
+              t1: { OF: 2, SP: 1, C: 1 },
+              t2: { OF: 1, RP: 1, SP: 1 },
+            },
+          },
+          teamId: 't1',
+          limit: 10,
+        })
+    );
+    expect(recLowBudget.status).toBe(200);
+    expect(recLowBudget.body.success).toBe(true);
+
+    // Budget constraints should flow through into lower valuation scale/recommended bids.
+    expect(recLowBudget.body.meta.targetTotalValue).toBeLessThan(recHighBudget.body.meta.targetTotalValue);
+    const highById = new Map(
+      (recHighBudget.body.recommendations || []).map((r) => [r.playerId, Number(r.recommendedBid) || 0])
+    );
+    const lowById = new Map(
+      (recLowBudget.body.recommendations || []).map((r) => [r.playerId, Number(r.recommendedBid) || 0])
+    );
+    const overlap = [...highById.keys()].filter((id) => lowById.has(id));
+    expect(overlap.length).toBeGreaterThan(0);
+
+    const highAvg = overlap.reduce((s, id) => s + highById.get(id), 0) / overlap.length;
+    const lowAvg = overlap.reduce((s, id) => s + lowById.get(id), 0) / overlap.length;
+    expect(lowAvg).toBeLessThan(highAvg);
+  });
 });

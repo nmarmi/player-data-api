@@ -1043,6 +1043,21 @@ function runValuations(leagueSettings = {}, draftState = {}) {
   let hitters  = allHitters;
   let pitchers = allPitchers;
   let poolPlayers = allPoolPlayers;
+
+  // Exclude purchased players from available valuation pool (US-7.5 state transitions).
+  if (Array.isArray(draftState.purchasedPlayers) && draftState.purchasedPlayers.length) {
+    const purchasedIds = new Set(
+      draftState.purchasedPlayers
+        .map((pp) => pp && pp.playerId)
+        .filter(Boolean)
+    );
+    if (purchasedIds.size) {
+      hitters = hitters.filter((p) => !purchasedIds.has(p.player_id));
+      pitchers = pitchers.filter((p) => !purchasedIds.has(p.player_id));
+      poolPlayers = poolPlayers.filter((p) => !purchasedIds.has(p.playerId));
+    }
+  }
+
   if (Array.isArray(draftState.availablePlayerIds) && draftState.availablePlayerIds.length) {
     const avail = new Set(draftState.availablePlayerIds);
     hitters  = hitters.filter((p)  => avail.has(p.player_id));
