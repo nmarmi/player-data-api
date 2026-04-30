@@ -643,6 +643,142 @@ function parseRosterSlotsConfig(leagueSettings = {}) {
   };
 }
 
+// ── US-5.4: Draft-state-aware overrides ──────────────────────────────────────
+
+/**
+ * Aggregates remaining open roster slots per position across all teams.
+ *
+ * @param {Record<string, Record<string,number>>} filledRosterSlots
+ *   teamId → { position → filledCount }
+ * @param {Record<string,number>} rosterSlotsMap
+ *   position → slotsPerTeam  (the leagueSettings.rosterSlots map)
+ * @param {string[]} teamIds
+ * @returns {Record<string,number>}  position → total remaining open slots (across all teams)
+ */
+function computeRemainingSlotsByPosition(filledRosterSlots, rosterSlotsMap, teamIds) {
+  const remaining = {};
+  for (const [rawPos, slotsPerTeam] of Object.entries(rosterSlotsMap)) {
+    const pos = String(rawPos).toUpperCase();
+    if (pos === 'BENCH') continue;
+    if (!HITTER_POSITION_KEYS.has(pos) && !PITCHER_POSITION_KEYS.has(pos)) continue;
+
+    let totalOpen = 0;
+    for (const teamId of teamIds) {
+      const filled = Number(
+        (filledRosterSlots[teamId] || {})[pos] ||
+        (filledRosterSlots[teamId] || {})[rawPos] ||
+        0
+      );
+      totalOpen += Math.max(0, Number(slotsPerTeam) - filled);
+    }
+    if (totalOpen > 0) remaining[pos] = totalOpen;
+  }
+  return remaining;
+}
+
+/**
+ * Computes draft-state-aware overrides for league settings.
+ *
+ * When a live draft is in progress the engine uses:
+ *   - Remaining salary pool  = sum(teamBudgets) − $1 × openSlotsAcrossAllTeams
+ *     (expressed as a per-team budget so computeValuations' numTeams×budget still works)
+ *   - positionTotalDemand    = remaining open slots per position (total, not per-team)
+ *     which replaces the per-team × numTeams calculation inside computeValuations.
+ *
+ * Pre-draft (empty draftState) → returns settings unchanged.
+ *
+ * @param {object} settings       - merged league settings from mergeSettings()
+ * @param {object} draftState     - raw draftState from the request
+ * @param {object} leagueSettings - raw leagueSettings from the request (for rosterSlots map)
+ * @returns {object}              - settings with dynamic overrides applied
+ */
+function applyDraftStateOverrides(settings, draftState, leagueSettings) {
+  const { purchasedPlayers, teamBudgets, filledRosterSlots } = draftState;
+
+  const hasPurchases    = Array.isArray(purchasedPlayers) && purchasedPlayers.length > 0;
+  const hasTeamBudgets  = teamBudgets != null &&
+                          typeof teamBudgets === 'object' &&
+                          !Array.isArray(teamBudgets) &&
+                          Object.keys(teamBudgets).length > 0;
+  const hasFilledSlots  = filledRosterSlots != null && typeof filledRosterSlots === 'object';
+  const hasRosterMap    = leagueSettings.rosterSlots != null &&
+                          typeof leagueSettings.rosterSlots === 'object' &&
+                          !Array.isArray(leagueSettings.rosterSlots);
+
+  // Pre-draft baseline — no overrides needed
+  if (!hasPurchases && !hasTeamBudgets && !hasFilledSlots) return settings;
+
+  const overrides = { ...settings };
+
+  // ── Dynamic budget recalculation ──────────────────────────────────────────
+  if (hasTeamBudgets) {
+    const teamIds = Object.keys(teamBudgets);
+    const totalRemainingBudget = teamIds.reduce(
+      (s, id) => s + Math.max(0, Number(teamBudgets[id] || 0)), 0
+    );
+
+    // Compute total open slots across all teams (for the $1-minimum reservation)
+    let openSlotsAcrossAllTeams;
+    if (hasFilledSlots && hasRosterMap) {
+      openSlotsAcrossAllTeams = teamIds.reduce((sum, teamId) => {
+        const filled = filledRosterSlots[teamId] || {};
+        for (const [rawPos, slotsPerTeam] of Object.entries(leagueSettings.rosterSlots)) {
+          const pos        = String(rawPos).toUpperCase();
+          if (pos === 'BENCH') continue;
+          const filledCount = Number(filled[pos] || filled[rawPos] || 0);
+          sum += Math.max(0, Number(slotsPerTeam) - filledCount);
+        }
+        return sum;
+      }, 0);
+    } else {
+      // Estimate: (total league slots) − (number already purchased)
+      const totalSlotsPerTeam = settings.hitterSlotsPerTeam + settings.pitcherSlotsPerTeam;
+      const numPurchased       = hasPurchases ? purchasedPlayers.length : 0;
+      openSlotsAcrossAllTeams  = Math.max(0, settings.numTeams * totalSlotsPerTeam - numPurchased);
+    }
+
+    // remainingSalaryPool = sum(teamBudgets) − $1 × openSlotsAcrossAllTeams
+    const remainingSalaryPool = Math.max(0, totalRemainingBudget - openSlotsAcrossAllTeams);
+
+    // Express as a per-team value so computeValuations' (numTeams × budget) yields the right total
+    if (settings.numTeams > 0) {
+      overrides.budget = remainingSalaryPool / settings.numTeams;
+    }
+
+    // Stash for meta reporting
+    overrides._draftBudgetMeta = { remainingSalaryPool, totalRemainingBudget, openSlotsAcrossAllTeams };
+  }
+
+  // ── Positional replacement-level recalculation ────────────────────────────
+  if (hasFilledSlots && hasRosterMap) {
+    const teamIds = hasTeamBudgets
+      ? Object.keys(teamBudgets)
+      : Object.keys(filledRosterSlots);
+
+    const remainingByPosition = computeRemainingSlotsByPosition(
+      filledRosterSlots, leagueSettings.rosterSlots, teamIds
+    );
+
+    if (Object.keys(remainingByPosition).length > 0) {
+      // positionTotalDemand: total across all teams (computeValuations will skip ×numTeams)
+      overrides.positionTotalDemand = remainingByPosition;
+
+      // Keep per-team slot counts consistent so replacement-rank calcs stay meaningful
+      const hitterTotal  = Object.entries(remainingByPosition)
+        .filter(([pos]) => HITTER_POSITION_KEYS.has(pos))
+        .reduce((s, [, n]) => s + n, 0);
+      const pitcherTotal = Object.entries(remainingByPosition)
+        .filter(([pos]) => PITCHER_POSITION_KEYS.has(pos))
+        .reduce((s, [, n]) => s + n, 0);
+
+      if (hitterTotal  > 0) overrides.hitterSlotsPerTeam  = hitterTotal  / settings.numTeams;
+      if (pitcherTotal > 0) overrides.pitcherSlotsPerTeam = pitcherTotal / settings.numTeams;
+    }
+  }
+
+  return overrides;
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 // Positions that map to the hitter budget bucket
@@ -799,12 +935,20 @@ function computeValuations(hitterRows, pitcherRows, poolPlayers, settings) {
   const scoredHitters  = computeZScores(hitters,  hittingCategories,  settings);
   const scoredPitchers = computeZScores(pitchers, pitchingCategories, settings);
 
-  const hitterDemand = {};
+  const hitterDemand  = {};
   const pitcherDemand = {};
-  for (const [position, count] of Object.entries(positionSlotMap || {})) {
-    if (!count) continue;
-    if (HITTER_POSITION_KEYS.has(position)) hitterDemand[position] = count * numTeams;
-    if (PITCHER_POSITION_KEYS.has(position)) pitcherDemand[position] = count * numTeams;
+  if (settings.positionTotalDemand) {
+    // US-5.4 draft-state override: remaining total slots already span all teams
+    for (const [position, totalCount] of Object.entries(settings.positionTotalDemand)) {
+      if (HITTER_POSITION_KEYS.has(position))  hitterDemand[position]  = totalCount;
+      if (PITCHER_POSITION_KEYS.has(position)) pitcherDemand[position] = totalCount;
+    }
+  } else {
+    for (const [position, count] of Object.entries(positionSlotMap || {})) {
+      if (!count) continue;
+      if (HITTER_POSITION_KEYS.has(position))  hitterDemand[position]  = count * numTeams;
+      if (PITCHER_POSITION_KEYS.has(position)) pitcherDemand[position] = count * numTeams;
+    }
   }
 
   const hitterReplacementByPosition = buildReplacementByPosition(
@@ -906,29 +1050,37 @@ function runValuations(leagueSettings = {}, draftState = {}) {
     poolPlayers = poolPlayers.filter((p) => avail.has(p.playerId));
   }
 
-  const valuations = computeValuations(hitters, pitchers, poolPlayers, settings);
+  // US-5.4: override budget and positional demand when live draft state is present
+  const effectiveSettings = applyDraftStateOverrides(settings, draftState, leagueSettings);
+
+  const valuations = computeValuations(hitters, pitchers, poolPlayers, effectiveSettings);
 
   const hitterCount  = valuations.filter((v) => v.statGroup === 'hitting').length;
   const pitcherCount = valuations.filter((v) => v.statGroup === 'pitching').length;
   const totalValue   = valuations.reduce((s, v) => s + v.dollarValue, 0);
+  const isDraftActive = Array.isArray(draftState.purchasedPlayers)
+    ? draftState.purchasedPlayers.length > 0
+    : !!(draftState.teamBudgets || draftState.filledRosterSlots);
 
   const meta = {
     season,
-    numTeams:       settings.numTeams,
-    budget:         settings.budget,
-    hitterSlots:    settings.numTeams * settings.hitterSlotsPerTeam,
-    pitcherSlots:   settings.numTeams * settings.pitcherSlotsPerTeam,
+    numTeams:         effectiveSettings.numTeams,
+    budget:           effectiveSettings.budget,
+    hitterSlots:      effectiveSettings.numTeams * effectiveSettings.hitterSlotsPerTeam,
+    pitcherSlots:     effectiveSettings.numTeams * effectiveSettings.pitcherSlotsPerTeam,
     hitterCount,
     pitcherCount,
     totalValue,
-    targetTotalValue: settings.numTeams * settings.budget,
-    valuationCount: valuations.length,
-    calibrationError: roundCurrency(totalValue - (settings.numTeams * settings.budget)),
+    targetTotalValue: effectiveSettings.numTeams * effectiveSettings.budget,
+    valuationCount:   valuations.length,
+    calibrationError: roundCurrency(totalValue - (effectiveSettings.numTeams * effectiveSettings.budget)),
+    isDraftActive,
+    draftBudget:      effectiveSettings._draftBudgetMeta || null,
     rosterSlotConfig: {
-      positionSlotMap: settings.positionSlotMap,
-      ignoredBenchSlots: settings.ignoredBenchSlots,
-      unknownRosterSlotKeys: settings.unknownRosterSlotKeys,
-      legacyFlatRosterSlots: settings.legacyFlatRosterSlots,
+      positionSlotMap:       effectiveSettings.positionSlotMap,
+      ignoredBenchSlots:     effectiveSettings.ignoredBenchSlots,
+      unknownRosterSlotKeys: effectiveSettings.unknownRosterSlotKeys,
+      legacyFlatRosterSlots: effectiveSettings.legacyFlatRosterSlots,
     },
   };
 
@@ -940,6 +1092,8 @@ module.exports = {
   computeValuations,
   mergeSettings,
   normalizeLeagueSettings,
+  applyDraftStateOverrides,
+  computeRemainingSlotsByPosition,
   loadStatRows,
   DEFAULTS,
   HITTER_POSITIONS_SET,
