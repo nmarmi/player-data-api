@@ -1,6 +1,6 @@
 {
   "outputDirectory": "public",
   "rewrites": [
-    { "source": "/api/:path*", "destination": "https://player-data-api.onrender.com/api/:path*" }
+    { "source": "/(.*)", "destination": "https://player-data-api.onrender.com/$1" }
   ]
 }
