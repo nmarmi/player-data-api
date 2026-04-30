@@ -94,7 +94,7 @@ function playerNeed(playerPositions, openSlots, totalSlots) {
 }
 
 function validateBody(body) {
-  const { draftState = {}, teamId } = body;
+  const { draftState = {}, teamId, leagueSettings = {} } = body;
   const errors = [];
 
   if (draftState.availablePlayerIds !== undefined && !Array.isArray(draftState.availablePlayerIds)) {
@@ -110,6 +110,32 @@ function validateBody(body) {
     errors.push({ field: 'draftState.teamBudgets', message: 'Must be an object' });
   }
 
+  // Draft Kit integration shape validation:
+  // if the request is using Draft Kit keys, rosterSlots must be provided as a map.
+  const usesDraftKitShape = (
+    leagueSettings &&
+    typeof leagueSettings === 'object' &&
+    (
+      leagueSettings.numberOfTeams !== undefined ||
+      leagueSettings.salaryCap !== undefined ||
+      leagueSettings.scoringType !== undefined
+    )
+  );
+  if (usesDraftKitShape) {
+    const rs = leagueSettings.rosterSlots;
+    const rosterSlotsMissing = rs === undefined || rs === null;
+    const rosterSlotsInvalidType = !rosterSlotsMissing && (
+      typeof rs !== 'object' ||
+      Array.isArray(rs)
+    );
+    if (rosterSlotsMissing || rosterSlotsInvalidType) {
+      errors.push({
+        field: 'leagueSettings.rosterSlots',
+        message: 'Draft Kit shape requires rosterSlots as a position->count object',
+      });
+    }
+  }
+
   // US-6.2: teamId must be present in teamBudgets when supplied
   if (teamId && draftState.teamBudgets && !(teamId in draftState.teamBudgets)) {
     return {
@@ -118,6 +144,7 @@ function validateBody(body) {
         success: false,
         error:   `teamId "${teamId}" not found in draftState.teamBudgets`,
         code:    'UNKNOWN_TEAM',
+        fields:  [{ field: 'teamId', message: 'Unknown teamId for provided draftState.teamBudgets' }],
       },
     };
   }

@@ -15,12 +15,22 @@ const app = express();
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 //supports versioned APIs just in case we make changes later on, so we dont break the app
 const API_VERSION = 'v1';
+const LEGACY_SUNSET = process.env.LEGACY_API_SUNSET || 'Wed, 31 Dec 2026 23:59:59 GMT';
 
 //middleware : runs before routes
 //allows requests from browsers. without this the frontend requests would be blocked
 app.use(cors({ origin: ALLOWED_ORIGIN }));
 //lets API read json request bodies
 app.use(express.json());
+
+// US-2.8: mark legacy unversioned endpoints as deprecated.
+app.use((req, res, next) => {
+  if (!req.path.startsWith(`/api/${API_VERSION}/`)) {
+    res.set('Deprecation', 'true');
+    res.set('Sunset', LEGACY_SUNSET);
+  }
+  next();
+});
 
 // Attach apiVersion to every JSON response
 app.use((_req, res, next) => {
