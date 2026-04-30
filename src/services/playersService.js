@@ -1,12 +1,3 @@
-const fs = require('fs');
-const path = require('path');
-
-const playersDataPath = path.join(__dirname, '..', '..', 'data', 'players.json');
-const externalPlayersPath = process.env.PLAYERS_DATA_PATH
-  ? path.resolve(process.cwd(), process.env.PLAYERS_DATA_PATH)
-  : null;
-const fallbackPlayers = require('../../data/players');
-
 let _getDb = null;
 function tryGetDb() {
   if (!_getDb) {
@@ -349,12 +340,6 @@ function inferMlbPersonId(player, index) {
   );
 }
 
-function readPlayersFromPath(filePath) {
-  if (!filePath) return null;
-  if (!fs.existsSync(filePath)) return null;
-  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-}
-
 function normalizePlayerRecord(player, index) {
   const mlbPersonId = inferMlbPersonId(player, index);
   const mlbTeam = String(player.mlbTeam || player.team || '').trim().toUpperCase();
@@ -380,16 +365,10 @@ function normalizePlayerRecord(player, index) {
 }
 
 function loadPlayers() {
-  // US-3.3: prefer database; fall back to JSON if DB unavailable or empty
+  // DB-only mode: player list must come from the database.
   const dbPlayers = loadPlayersFromDb();
   if (dbPlayers) return dbPlayers;
-
-  let players = null;
-  try {
-    players = readPlayersFromPath(externalPlayersPath) || readPlayersFromPath(playersDataPath);
-  } catch (_) {}
-  if (!Array.isArray(players) || !players.length) players = fallbackPlayers;
-  return dedupePlayers(players.map(normalizePlayerRecord));
+  return [];
 }
 
 function firstValue(value) {

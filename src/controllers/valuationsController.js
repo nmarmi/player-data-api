@@ -13,7 +13,6 @@ const {
   normalizeLeagueSettings,
   getExclusionDiagnostics,
 } = require('../services/valuationEngine');
-const { loadPlayers }           = require('../services/playersService');
 const { getDataFreshnessMeta }  = require('../db/syncLog');
 
 // Sources that feed the valuation engine
@@ -21,42 +20,6 @@ const VALUATION_SOURCES = ['player_metadata', 'player_stats'];
 
 function freshness() {
   try { return getDataFreshnessMeta(VALUATION_SOURCES); } catch (_) { return {}; }
-}
-
-const DEFAULT_BUDGET       = 260;
-const DEFAULT_NUM_TEAMS    = 10;
-
-// ── Placeholder (used only when player_stats table is empty) ─────────────────
-
-function placeholderValuations(players, leagueSettings = {}) {
-  if (!Array.isArray(players) || !players.length) return [];
-
-  const budget = Number(leagueSettings.budget) || DEFAULT_BUDGET;
-  const numTeams = Number(leagueSettings.numTeams) || DEFAULT_NUM_TEAMS;
-  const targetTotal = Math.max(0, budget * numTeams);
-
-  const sorted = [...players].sort((a, b) => {
-    const diff = (b.fpts || 0) - (a.fpts || 0);
-    return diff !== 0 ? diff : (a.name || '').localeCompare(b.name || '');
-  });
-
-  const minFpts = Math.min(...sorted.map((p) => Number(p.fpts) || 0));
-  const weights = sorted.map((p) => Math.max(0, (Number(p.fpts) || 0) - minFpts) + 1);
-  const weightSum = weights.reduce((s, w) => s + w, 0) || 1;
-
-  const valuations = sorted.map((player, i) => {
-    const rawValue = targetTotal * (weights[i] / weightSum);
-    const dollarValue = Math.round(rawValue * 100) / 100;
-    return { playerId: player.playerId, dollarValue, projectedValue: dollarValue, rank: i + 1 };
-  });
-
-  const total = valuations.reduce((s, v) => s + v.dollarValue, 0);
-  const diff = Math.round((targetTotal - total) * 100) / 100;
-  if (diff !== 0 && valuations.length) {
-    valuations[0].dollarValue = Math.round((valuations[0].dollarValue + diff) * 100) / 100;
-    valuations[0].projectedValue = valuations[0].dollarValue;
-  }
-  return valuations;
 }
 
 // ── Controller ────────────────────────────────────────────────────────────────
@@ -138,39 +101,28 @@ function getValuations(req, res) {
         ...freshness(),
       });
     }
-    // Engine returned nothing (no stats) — fall through to placeholder
+    // DB-only mode: no valuation stats available.
+    return res.status(503).json({
+      success: false,
+      error: 'No player stats available in database. Run ingestion jobs first.',
+      code: 'STATS_UNAVAILABLE',
+      ...(debugExclusions ? {
+        debug: getExclusionDiagnostics(normalizedSettings, draftState, { playerIds: debugPlayerIds }),
+      } : {}),
+      ...freshness(),
+    });
   } catch (err) {
-    console.error('[valuations] Engine error — falling back to placeholder:', err.message);
+    console.error('[valuations] Engine error:', err.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to compute valuations',
+      code: 'ENGINE_ERROR',
+      ...(debugExclusions ? {
+        debug: getExclusionDiagnostics(normalizedSettings, draftState, { playerIds: debugPlayerIds }),
+      } : {}),
+      ...freshness(),
+    });
   }
-
-  // Placeholder fallback
-  const { availablePlayerIds } = draftState;
-
-  let players = loadPlayers();
-  if (Array.isArray(availablePlayerIds) && availablePlayerIds.length) {
-    const idSet = new Set(availablePlayerIds);
-    players = players.filter((p) => idSet.has(p.playerId));
-  }
-
-  const valuations = placeholderValuations(players, normalizedSettings);
-  const totalValue = valuations.reduce((s, v) => s + (v.dollarValue || 0), 0);
-  const numTeams = Number(normalizedSettings.numTeams) || DEFAULT_NUM_TEAMS;
-  const budget = Number(normalizedSettings.budget) || DEFAULT_BUDGET;
-  return res.json({
-    success:    true,
-    valuations,
-    meta:       {
-      note: 'Placeholder valuations — run import-stats to enable the full model',
-      valuationCount: valuations.length,
-      totalValue,
-      targetTotalValue: numTeams * budget,
-      calibrationError: Math.round((totalValue - (numTeams * budget)) * 100) / 100,
-    },
-    ...(debugExclusions ? {
-      debug: getExclusionDiagnostics(normalizedSettings, draftState, { playerIds: debugPlayerIds }),
-    } : {}),
-    ...freshness(),
-  });
 }
 
-module.exports = { getValuations, placeholderValuations };
+module.exports = { getValuations };

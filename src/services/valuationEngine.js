@@ -25,9 +25,6 @@
 
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-
 // Lazily load the DB connection so the file doesn't crash if SQLite is unavailable
 let _getDb = null;
 function tryGetDb() {
@@ -35,19 +32,6 @@ function tryGetDb() {
     try { _getDb = require('../db/connection').getDb; } catch (_) {}
   }
   try { return _getDb ? _getDb() : null; } catch (_) { return null; }
-}
-
-// Cache the fallback JSON in memory so we only read the file once per process
-let _fallbackStats = null;
-function loadFallbackStats() {
-  if (_fallbackStats) return _fallbackStats;
-  try {
-    const filePath = path.join(__dirname, '..', '..', 'data', 'player-stats.json');
-    if (fs.existsSync(filePath)) {
-      _fallbackStats = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    }
-  } catch (_) {}
-  return _fallbackStats || [];
 }
 
 // ── Default league settings ───────────────────────────────────────────────────
@@ -161,13 +145,7 @@ function loadStatRows(season, group) {
       if (rows.length) return rows;
     } catch (_) {}
   }
-
-  // STEP 1 (fallback): SQLite unavailable (e.g. Vercel serverless) — use the bundled JSON file
-  const allRows = loadFallbackStats();
-  if (!allRows.length) return [];
-  const maxSeason = allRows.reduce((max, r) => Math.max(max, r.season || 0), 0);
-  const targetSeason = season || maxSeason;
-  return allRows.filter((r) => r.season === targetSeason && r.stat_group === group);
+  return [];
 }
 
 // ── Core computation ──────────────────────────────────────────────────────────
@@ -627,22 +605,7 @@ function loadPlayerPool() {
       }
     } catch (_) {}
   }
-
-  const fallback = loadFallbackStats();
-  if (!fallback.length) return [];
-
-  const byId = new Map();
-  for (const row of fallback) {
-    const id = String(row.player_id || '');
-    if (!id || byId.has(id)) continue;
-    byId.set(id, {
-      playerId: id,
-      name: String(row.name || ''),
-      mlbTeam: String(row.mlb_team || ''),
-      positions: safeParsePositions(row.positions),
-    });
-  }
-  return dedupePoolPlayers([...byId.values()]);
+  return [];
 }
 
 function calibrateValuationTotals(valuations, targetTotal) {
