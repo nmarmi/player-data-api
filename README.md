@@ -1,133 +1,153 @@
 # Player Data API
 
-Standalone **licensable** Player Data API for a fantasy baseball draft kit. Supports **pull** (GET players) and **push** (POST usage/events) with license validation.
+Standalone **licensable** Player Data API for a fantasy baseball draft kit. Provides player data, auction-dollar valuations, and draft recommendations via a z-score-above-replacement engine backed by live MLB Stats API data.
 
 ## Endpoints
 
-| Method | Path            | Purpose                    | License required |
-|--------|-----------------|----------------------------|------------------|
-| GET    | /health         | Health check               | No               |
-| GET    | /license/check  | Validate license           | Yes              |
-| GET    | /players        | Pull player data           | Yes              |
-| GET    | /players/filters| Get search filter options  | Yes              |
-| POST   | /usage          | Push usage/event from app  | Yes              |
+All endpoints except `/health` require `X-API-Key: <key>` or `Authorization: Bearer <key>`. Admin endpoints additionally require `X-Admin-Key: <key>`.
 
-- **License**: Send `X-API-Key: <key>` or `Authorization: Bearer <key>`.
-- **Player identity**: Every player includes `mlbPersonId` and `playerId` in the format `mlb-{mlbPersonId}`.
-- **MLB team identity**: Every player includes `mlbTeamId` in the format `mlb-{mlbTeamId}` and `mlbTeam` as the team abbreviation (e.g., `LAD`).
-- **GET /players** query params (optional):
-  - Base filters: `search`, `team`, `position`
-  - Numeric ranges: `minFpts`, `maxFpts`, `minHr`, `maxHr`, `minRbi`, `maxRbi`, `minAvg`, `maxAvg` (plus same pattern for `ab,r,h,bb,k,sb,obp,slg`)
-  - Sorting/paging: `sortBy`, `sortOrder` (`asc`/`desc`), `limit`, `offset`
-- **GET /players/filters** returns available `teams`, `positions`, and supported `sortFields`.
-- **POST /usage** body: `{ "event": "...", "timestamp": "ISO8601", "metadata": {} }`.
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/health` | Health check (no auth) |
+| GET | `/license/check` | Validate license key |
+| GET | `/players` | Paginated player list with filters/sorting |
+| GET | `/players/filters` | Available teams, positions, and sort fields |
+| GET | `/players/pool` | Player list filtered by position(s) |
+| GET | `/players/:playerId` | Single player by ID |
+| POST | `/players/valuations` | Auction dollar valuations (z-score engine) |
+| POST | `/players/recommendations` | Top available players by projected value |
+| POST | `/players/recommendations/nominations` | Nomination targets to drain opponents' budgets |
+| POST | `/players/recommendations/budget` | Per-position spend allocations |
+| GET | `/usage/sync-status` | Data freshness status |
+| POST | `/usage` | Log a usage event |
+| POST | `/admin/refresh` | Manually trigger data ingestion (admin key required) |
 
-## Player data from CSV
+All paths above are also available under the `/api/v1/` prefix (canonical form). The unversioned aliases are kept for backward compatibility.
 
-The API uses **data/players.json** as the local player data source by default. To generate/update this dataset from your own NL stats or projections:
+### GET /players — query params
 
-```bash
-node scripts/csv-to-players.js /path/to/your.csv
+- `search` — player name substring
+- `team` — MLB team abbreviation (e.g. `LAD`)
+- `position` — position code (e.g. `OF`, `SP`)
+- Numeric ranges: `minFpts`, `maxFpts`, `minHr`, `maxHr`, `minRbi`, `maxRbi`, `minAvg`, `maxAvg` (and same pattern for `ab r h bb k sb obp slg`)
+- `sortBy`, `sortOrder` (`asc`/`desc`), `limit`, `offset`
+
+### POST /players/valuations — body
+
+```json
+{
+  "leagueSettings": { "numberOfTeams": 12, "salaryCap": 260 },
+  "draftState": {
+    "availablePlayerIds": ["mlb-123456", "mlb-789012"],
+    "purchasedPlayers": [],
+    "teamBudgets": {}
+  }
+}
 ```
 
-Expected CSV columns: `Player,AB,R,H,1B,2B,3B,HR,RBI,BB,K,SB,CS,AVG,OBP,SLG,FPTS` plus optional `mlbPersonId` (`mlb_person_id`/`mlbamid`) and optional `mlbTeamId` (`mlb_team_id`/`teamid`). The `Player` column should be like `"Name Position | TEAM"` (e.g. `Juan Soto OF | NYM`). Output is written to **data/players.json**.
-The importer now emits PlayerStub-compatible fields (`playerId`, `name`, `positions[]`, `mlbTeam`, `status`, `isAvailable`) and prints skipped-row reasons for invalid records.
-
-### Pull data from balldontlie MLB API
-
-To generate `data/players.json` from [mlb.balldontlie.io](https://mlb.balldontlie.io/), run:
-
-```bash
-npm run import-mlb
-```
-
-Set your balldontlie API key first:
-
-```bash
-export BALLDONTLIE_API_KEY=your_api_key_here
-```
-
-Optional flags:
-
-```bash
-node scripts/fetch-mlb-data.js --season=2026 --out=data/players.json --per-page=100
-node scripts/fetch-mlb-data.js --max-players=300
-```
-
-This importer pulls active players, injuries (if your plan includes that endpoint), and season stats (if your plan includes that endpoint), then writes PlayerStub-compatible records with stats included.
-For free-tier keys, keep `--max-players` low (e.g. 300-400) to avoid frequent 429 rate-limit errors.
-
-Example with your files:
-
-```bash
-npm run import-csv -- ~/Downloads/2025-player-NL-stats.csv
-# or 3Year-average-NL-stats.csv / projections-NL.csv
-```
+`leagueSettings` also accepts `numTeams`/`budget` (internal shape). `draftState` is optional; omit to value all players. Returns 503 if season stats are unavailable in the DB.
 
 ## Setup
 
 ```bash
 cp .env.example .env
-# Edit .env: set API_LICENSE_KEY (or VALID_API_KEYS) and optionally ALLOWED_ORIGIN
+# Edit .env: set API_LICENSE_KEY and optionally ALLOWED_ORIGIN
 npm install
 npm start
 ```
 
-- **PORT** (default 4001)
-- **API_LICENSE_KEY** – single key, or **VALID_API_KEYS** – comma-separated keys
-- **ALLOWED_ORIGIN** – CORS origin (e.g. `http://localhost:3000` for draft kit)
-- **PLAYERS_DATA_PATH** – optional override path to player data JSON (default is `data/players.json`).
+### Load player data
 
-## Deploy to Vercel
-This repo is configured for Vercel using:
+The API uses SQLite (`data/players.db`) as its primary data store, seeded and refreshed from the live MLB Stats API. On first start the DB is seeded from the bundled `data/players.json`.
 
-- `api/index.js` as the serverless entrypoint
-- `vercel.json` rewrite to route all paths to the Express app
+```bash
+# Full refresh from MLB Stats API
+npm run import-mlb-db       # player metadata (40-man rosters)
+npm run import-stats        # season hitting/pitching stats
+npm run import-depth-charts # depth chart rankings
+npm run import-injuries     # IL / injury status
+npm run import-transactions # transaction log
+```
 
-Steps:
+Or trigger a refresh at runtime:
 
-1. Push this repo to GitHub.
-2. In Vercel: **Add New -> Project**, then import this repository.
-3. Keep defaults and deploy.
-4. In **Project Settings -> Environment Variables**, set:
-   - `API_LICENSE_KEY` (required)
-   - `ALLOWED_ORIGIN` (for MVP you can use `*`)
-5. Redeploy after adding env vars.
-6. Verify:
-   - `https://<your-vercel-domain>/health`
-7. Add custom domain:
-   - **Project Settings -> Domains** -> add `api.yourdomain.com`
-   - Create the DNS records Vercel shows at your registrar.
+```bash
+curl -X POST http://localhost:4001/api/v1/admin/refresh \
+  -H "X-Admin-Key: <admin_key>" \
+  -H "Content-Type: application/json" \
+  -d '{"sources": ["player_metadata", "player_stats"]}'
+```
+
+### Load data from CSV or balldontlie API (legacy)
+
+These scripts write to `data/players.json` (used only as fallback/seed, not the live data source):
+
+```bash
+# From a NL stats CSV
+npm run import-csv -- ~/Downloads/2025-player-NL-stats.csv
+
+# From balldontlie API (requires BALLDONTLIE_API_KEY env var)
+npm run import-mlb
+```
+
+Expected CSV columns: `Player,AB,R,H,1B,2B,3B,HR,RBI,BB,K,SB,CS,AVG,OBP,SLG,FPTS` plus optional `mlbPersonId` and `mlbTeamId`. The `Player` column should be `"Name Position | TEAM"` (e.g. `Juan Soto OF | NYM`).
+
+## Key env vars
+
+| Var | Purpose | Default |
+|-----|---------|---------|
+| `PORT` | Server port | 4001 |
+| `API_LICENSE_KEY` | Single valid API key | (required) |
+| `VALID_API_KEYS` | Comma-separated API keys | — |
+| `ADMIN_KEY` | Admin endpoint key (`X-Admin-Key`) | — |
+| `ALLOWED_ORIGIN` | CORS origin | `*` |
+| `DB_PATH` | SQLite file path | `data/players.db` |
+| `SCHEDULER_ENABLED` | Enable background ingestion | `true` |
 
 ## Demo UI
 
-Open `http://localhost:4001` (or `/demo.html`) to use the small front end:
+Open `http://localhost:4001` (or `/demo.html`) to use the built-in front end:
 
-1. **License check** – GET /license/check with your API key
-2. **Pull players** – Search + filter + sort from the UI (full stack via GET /players and GET /players/filters)
-3. **Push usage** – POST /usage with a sample event
+1. **License check** — GET /license/check with your API key
+2. **Pull players** — search, filter, and sort the full player list
+3. **Push usage** — POST /usage with a sample event
 
 ## Project structure
 
-- `src/routes/*` only defines endpoints and middleware.
-- `src/controllers/*` contains request handlers.
-- `src/services/playersService.js` contains player data loading, filter parsing, sorting, and pagination logic.
-
-## Troubleshooting
-
-**`EADDRINUSE: address already in use :::4001`** – Another process (often a previous run of this API) is using port 4001. Free it with:
-
-```bash
-lsof -ti :4001 | xargs kill -9
 ```
-
-Or set `PORT=4002` (or another port) in `.env` and restart.
+src/
+  app.js                    Express app (middleware + route registration)
+  index.js                  Server entry point
+  routes/                   Route definitions (health, license, players, usage, admin)
+  controllers/              Request handlers (one file per route group)
+  services/
+    playersService.js       Player loading, filtering, sorting, pagination
+    valuationEngine.js      Z-score above replacement auction valuation
+  jobs/                     Ingestion jobs (MLB Stats API → SQLite)
+  db/
+    connection.js           SQLite singleton (better-sqlite3)
+    migrate.js              Idempotent schema migration
+    seed.js                 Seed DB from players.json on first start
+    syncLog.js              data_sync_log table helpers
+  middleware/
+    license.js              requireLicense / requireAdmin middleware
+data/
+  players.db                SQLite database (primary store)
+  players.json              Seed/fallback player list
+tests/
+  *.test.js                 Jest test suites
+  fixtures/                 Draft-state snapshots for integration tests
+api/
+  index.js                  Vercel serverless entrypoint
+```
 
 ## Connecting the draft kit
 
-In the draft kit repo:
+In the draft kit repo, set:
+- `PLAYER_API_URL` — e.g. `http://localhost:4001` or your Vercel URL
+- `PLAYER_API_KEY` — your license key
 
-- Add env: `PLAYER_API_URL` (e.g. `http://localhost:4001`), `PLAYER_API_KEY` (license key).
-- Replace local player fetch with `GET <PLAYER_API_URL>/players` and header `X-API-Key: <PLAYER_API_KEY>`.
-- Call `POST <PLAYER_API_URL>/usage` when the user does something (e.g. opens draft room), with the same license header.
-
+Then:
+- Replace local player fetch with `GET <PLAYER_API_URL>/api/v1/players` + header `X-API-Key: <PLAYER_API_KEY>`
+- Call `POST <PLAYER_API_URL>/api/v1/players/valuations` with current `draftState` to get live auction values
+- Call `POST <PLAYER_API_URL>/api/v1/usage` to log events

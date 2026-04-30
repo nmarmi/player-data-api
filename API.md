@@ -18,6 +18,91 @@ All responses include `"apiVersion": "v1"` in the body.
 
 ---
 
+## Auth — TODO
+
+> These endpoints are not yet implemented. They support user account creation, login, and API key self-management.
+
+### `POST /api/v1/auth/register` — TODO
+Create a new user account.
+
+```json
+// Request body
+{ "email": "user@example.com", "password": "..." }
+```
+
+```json
+// Response
+{ "success": true, "message": "Account created" }
+```
+
+---
+
+### `POST /api/v1/auth/login` — TODO
+Authenticate and set a signed JWT in an `HttpOnly` cookie.
+
+```json
+// Request body
+{ "email": "user@example.com", "password": "..." }
+```
+
+```json
+// Response — sets cookie: auth_token=<jwt>; HttpOnly; SameSite=Strict
+{ "success": true }
+```
+
+---
+
+### `POST /api/v1/auth/logout` — TODO
+Clears the JWT cookie.
+
+```json
+// Response — clears cookie: auth_token
+{ "success": true, "message": "Logged out" }
+```
+
+---
+
+## API Keys — TODO
+
+> These endpoints are not yet implemented. They allow authenticated users to generate and manage their API keys. All require a valid `auth_token` JWT cookie.
+
+### `POST /api/v1/keys` — TODO
+Generate a new API key.
+
+```json
+// Response
+{ "success": true, "key": { "keyId": "key_abc123", "name": "My Draft App", "secret": "sk_...", "createdAt": "2026-04-24T00:00:00Z" } }
+```
+
+> The `secret` is only returned once at creation time. Store it immediately.
+
+---
+
+### `GET /api/v1/keys` — TODO
+List all API keys for the authenticated user. Secret values are not returned.
+
+```json
+// Response
+{
+  "success": true,
+  "keys": [
+    { "keyId": "key_abc123", "name": "My Draft App", "createdAt": "2026-04-24T00:00:00Z" }
+  ]
+}
+```
+
+---
+
+### `DELETE /api/v1/keys/:keyId` — TODO
+Revoke an API key. Any application using this key will immediately lose access.
+
+```json
+// Response
+{ "success": true, "message": "Key revoked" }
+```
+
+---
+
 ## Health
 
 ### `GET /api/v1/health`

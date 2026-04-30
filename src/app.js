@@ -65,7 +65,7 @@ app.use(express.static(path.join(__dirname, '..', 'public')));
 
 //root route
 app.get('/', (_req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'public', 'demo.html'));
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
 // 404 — unknown route

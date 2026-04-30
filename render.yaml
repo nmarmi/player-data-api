@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: player-data-api
+    runtime: node
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DB_PATH
+        value: /data/players.db
+      - key: SCHEDULER_ENABLED
+        value: "true"
+      - key: API_LICENSE_KEY
+        sync: false
+      - key: ADMIN_KEY
+        sync: false
+    disk:
+      name: players-db
+      mountPath: /data
+      sizeGB: 1
