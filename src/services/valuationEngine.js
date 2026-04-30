@@ -74,6 +74,12 @@ const DEFAULTS = {
   rateStats: new Set(['avg', 'era', 'whip']),
   // Which volume field to use when weighting a rate stat
   rateStatVolume: { avg: 'ab', era: 'ip', whip: 'ip' },
+  // Reliability regression settings (higher K => stronger pull to league average)
+  reliability: {
+    hittingK: { hr: 200, r: 180, rbi: 200, sb: 300, avg: 500 },
+    pitchingK: { w: 90, k: 70, sv: 70, era: 120, whip: 120 },
+    rookieVolumeFallbackPct: 0.6,
+  },
 };
 
 const HITTER_POSITION_KEYS = new Set(['C', '1B', '2B', '3B', 'SS', 'OF', 'UTIL', 'DH']);
@@ -105,6 +111,26 @@ function std(arr) {
   const m = mean(arr);
   const variance = arr.reduce((s, v) => s + (v - m) ** 2, 0) / arr.length;
   return Math.sqrt(variance) || 1;
+}
+
+function median(arr) {
+  if (!arr.length) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 0) return (sorted[mid - 1] + sorted[mid]) / 2;
+  return sorted[mid];
+}
+
+function reliabilityFactor(sample, k) {
+  const s = Math.max(0, Number(sample) || 0);
+  const kk = Math.max(1, Number(k) || 1);
+  return s / (s + kk);
+}
+
+function safeDiv(n, d) {
+  const denom = Number(d) || 0;
+  if (!denom) return 0;
+  return (Number(n) || 0) / denom;
 }
 
 // ── DB loader ─────────────────────────────────────────────────────────────────
@@ -209,6 +235,102 @@ function computeZScores(pool, categories, settings) {
     }
 
     return { ...player, zScores, zTotal };
+  });
+}
+
+function projectRowsWithReliability(rows, statGroup, settings) {
+  const isHitting = statGroup === 'hitting';
+  const volumeField = isHitting ? 'ab' : 'ip';
+  const reliabilityCfg = settings.reliability || DEFAULTS.reliability;
+  const kMap = isHitting ? reliabilityCfg.hittingK : reliabilityCfg.pitchingK;
+  const fallbackPct = Math.max(0, Math.min(1, Number(reliabilityCfg.rookieVolumeFallbackPct) || 0.6));
+
+  const volumes = rows.map((r) => Number(r[volumeField]) || 0).filter((v) => v > 0);
+  const medianVolume = median(volumes);
+  const fallbackVolume = medianVolume > 0 ? medianVolume * fallbackPct : (isHitting ? 350 : 90);
+
+  let leagueRates;
+  if (isHitting) {
+    const totalAb = rows.reduce((s, r) => s + (Number(r.ab) || 0), 0);
+    leagueRates = {
+      hr: safeDiv(rows.reduce((s, r) => s + (Number(r.hr) || 0), 0), totalAb),
+      r: safeDiv(rows.reduce((s, r) => s + (Number(r.r) || 0), 0), totalAb),
+      rbi: safeDiv(rows.reduce((s, r) => s + (Number(r.rbi) || 0), 0), totalAb),
+      sb: safeDiv(rows.reduce((s, r) => s + (Number(r.sb) || 0), 0), totalAb),
+      avg: safeDiv(rows.reduce((s, r) => s + (Number(r.h) || 0), 0), totalAb),
+    };
+  } else {
+    const totalIp = rows.reduce((s, r) => s + (Number(r.ip) || 0), 0);
+    leagueRates = {
+      w: safeDiv(rows.reduce((s, r) => s + (Number(r.w) || 0), 0), totalIp),
+      k: safeDiv(rows.reduce((s, r) => s + (Number(r.k) || 0), 0), totalIp),
+      sv: safeDiv(rows.reduce((s, r) => s + (Number(r.sv) || 0), 0), totalIp),
+      era: mean(rows.map((r) => Number(r.era) || 0).filter((v) => v > 0)),
+      whip: mean(rows.map((r) => Number(r.whip) || 0).filter((v) => v > 0)),
+    };
+  }
+
+  return rows.map((row) => {
+    const sample = Math.max(0, Number(row[volumeField]) || 0);
+    const expectedVolume = sample > 0 ? sample : fallbackVolume;
+
+    if (isHitting) {
+      const relHR = reliabilityFactor(sample, kMap.hr);
+      const relR = reliabilityFactor(sample, kMap.r);
+      const relRBI = reliabilityFactor(sample, kMap.rbi);
+      const relSB = reliabilityFactor(sample, kMap.sb);
+      const relAVG = reliabilityFactor(sample, kMap.avg);
+
+      const hrRate = safeDiv(row.hr, sample);
+      const rRate = safeDiv(row.r, sample);
+      const rbiRate = safeDiv(row.rbi, sample);
+      const sbRate = safeDiv(row.sb, sample);
+      const avgRate = sample > 0 ? safeDiv(row.h, sample) : (Number(row.avg) || 0);
+
+      const projHrRate = relHR * hrRate + (1 - relHR) * leagueRates.hr;
+      const projRRate = relR * rRate + (1 - relR) * leagueRates.r;
+      const projRbiRate = relRBI * rbiRate + (1 - relRBI) * leagueRates.rbi;
+      const projSbRate = relSB * sbRate + (1 - relSB) * leagueRates.sb;
+      const projAvg = relAVG * avgRate + (1 - relAVG) * leagueRates.avg;
+
+      return {
+        ...row,
+        ab: expectedVolume,
+        hr: projHrRate * expectedVolume,
+        r: projRRate * expectedVolume,
+        rbi: projRbiRate * expectedVolume,
+        sb: projSbRate * expectedVolume,
+        avg: projAvg,
+      };
+    }
+
+    const relW = reliabilityFactor(sample, kMap.w);
+    const relK = reliabilityFactor(sample, kMap.k);
+    const relSV = reliabilityFactor(sample, kMap.sv);
+    const relERA = reliabilityFactor(sample, kMap.era);
+    const relWHIP = reliabilityFactor(sample, kMap.whip);
+
+    const wRate = safeDiv(row.w, sample);
+    const kRate = safeDiv(row.k, sample);
+    const svRate = safeDiv(row.sv, sample);
+    const eraRate = Number(row.era) || leagueRates.era || 4.2;
+    const whipRate = Number(row.whip) || leagueRates.whip || 1.3;
+
+    const projWRate = relW * wRate + (1 - relW) * leagueRates.w;
+    const projKRate = relK * kRate + (1 - relK) * leagueRates.k;
+    const projSvRate = relSV * svRate + (1 - relSV) * leagueRates.sv;
+    const projEra = relERA * eraRate + (1 - relERA) * (leagueRates.era || eraRate);
+    const projWhip = relWHIP * whipRate + (1 - relWHIP) * (leagueRates.whip || whipRate);
+
+    return {
+      ...row,
+      ip: expectedVolume,
+      w: projWRate * expectedVolume,
+      k: projKRate * expectedVolume,
+      sv: projSvRate * expectedVolume,
+      era: projEra,
+      whip: projWhip,
+    };
   });
 }
 
@@ -928,12 +1050,23 @@ function computeValuations(hitterRows, pitcherRows, poolPlayers, settings) {
   const pitcherSlots = numTeams * pitcherSlotsPerTeam;
 
   // STEP 2: Drop players who didn't play enough to have meaningful stats
-  const hitters  = hitterRows.filter((p)  => (p.ab  ?? 0) >= minAB);
-  const pitchers = pitcherRows.filter((p) => (p.ip  ?? 0) >= minIP);
+  const hitters  = hitterRows.filter((p) => {
+    const ab = Number(p.ab) || 0;
+    return ab >= minAB || ab === 0;
+  });
+  const pitchers = pitcherRows.filter((p) => {
+    const ip = Number(p.ip) || 0;
+    return ip >= minIP || ip === 0;
+  });
+
+  // Reliability-weighted projection before z-scores:
+  // regresses small-sample players toward league averages and gives no-sample players a fallback volume.
+  const projectedHitters = projectRowsWithReliability(hitters, 'hitting', settings);
+  const projectedPitchers = projectRowsWithReliability(pitchers, 'pitching', settings);
 
   // STEPS 3 & 4: Score every player in each category and sum into a total z-score
-  const scoredHitters  = computeZScores(hitters,  hittingCategories,  settings);
-  const scoredPitchers = computeZScores(pitchers, pitchingCategories, settings);
+  const scoredHitters  = computeZScores(projectedHitters,  hittingCategories,  settings);
+  const scoredPitchers = computeZScores(projectedPitchers, pitchingCategories, settings);
 
   const hitterDemand  = {};
   const pitcherDemand = {};
