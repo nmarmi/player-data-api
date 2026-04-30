@@ -212,4 +212,91 @@ function getRecommendations(req, res) {
   });
 }
 
-module.exports = { getRecommendations };
+// ── US-6.3: Nomination suggestions ───────────────────────────────────────────
+
+/**
+ * POST /players/recommendations/nominations
+ *
+ * Strategy (documented per US-6.3):
+ *   Rank available players by nominationScore descending, where:
+ *     nominationScore = expectedMarketBid − myTeamValueToFill
+ *     expectedMarketBid  = player's projected dollar value (what competitors pay)
+ *     myTeamValueToFill  = expectedMarketBid × myTeamNeedScore
+ *
+ *   A high score means other teams will compete hard for a player that the
+ *   calling team doesn't actually need — ideal to nominate and drain opponents'
+ *   budgets without winning the player yourself.
+ *
+ * Required inputs: availablePlayerIds, teamBudgets, filledRosterSlots, teamId.
+ */
+function getNominations(req, res) {
+  const body = req.body || {};
+  const { leagueSettings = {}, draftState = {}, teamId } = body;
+  const limit = Math.min(Math.max(1, parseInt(body.limit, 10) || 15), 100);
+
+  if (!teamId) {
+    return res.status(400).json({
+      success: false,
+      error:   'teamId is required for nomination suggestions',
+      code:    'BAD_REQUEST',
+      fields:  [{ field: 'teamId', message: 'Required' }],
+    });
+  }
+
+  const { errors, teamError } = validateBody(body);
+  if (teamError) return res.status(400).json(teamError);
+  if (errors && errors.length) {
+    return res.status(400).json({
+      success: false, error: 'Invalid request body', code: 'BAD_REQUEST', fields: errors,
+    });
+  }
+
+  const normalizedSettings = normalizeLeagueSettings(leagueSettings);
+
+  let valuations, meta;
+  try {
+    ({ valuations, meta } = runValuations(normalizedSettings, draftState));
+  } catch (err) {
+    console.error('[nominations] Engine error:', err.message);
+    return res.status(500).json({
+      success: false, error: 'Failed to compute nominations', code: 'ENGINE_ERROR',
+    });
+  }
+
+  if (!valuations.length) {
+    return res.json({ success: true, nominations: [], meta: meta || {}, teamId });
+  }
+
+  const slotState = getTeamSlotState(teamId, draftState, leagueSettings);
+
+  const nominations = valuations
+    .map((v) => {
+      const { positionalNeed } = playerNeed(v.positions, slotState.open, slotState.total);
+      const expectedMarketBid  = v.dollarValue;
+      const myTeamNeedScore    = Math.round(positionalNeed * 100) / 100;
+      // How much of this player's dollar value is wasted on my team
+      const nominationScore    = expectedMarketBid * (1 - myTeamNeedScore);
+
+      const posLabel = (v.positions || []).join('/') || 'UTIL';
+      const reason = myTeamNeedScore < 0.2
+        ? `My team has ${posLabel} covered — good nomination to spend opponents' budgets`
+        : `Moderate need ($${expectedMarketBid} market value may still attract competition)`;
+
+      return {
+        playerId:          v.playerId,
+        name:              v.name,
+        expectedMarketBid,
+        myTeamNeedScore,
+        _nominationScore:  nominationScore,
+        reason,
+      };
+    })
+    .sort((a, b) => b._nominationScore - a._nominationScore)
+    .slice(0, limit)
+    // Strip the internal sort key before sending
+    .map(({ _nominationScore, ...rest }) => rest);
+
+  res.json({ success: true, nominations, meta: meta || {}, teamId });
+}
+
+module.exports = { getRecommendations, getNominations };
