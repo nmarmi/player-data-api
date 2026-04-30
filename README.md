@@ -1,5 +1,5 @@
 # Player Data API
- 
+
 Standalone **licensable** Player Data API for a fantasy baseball draft kit. Provides player data, auction-dollar valuations, and draft recommendations via a z-score-above-replacement engine backed by live MLB Stats API data.
 
 ## Endpoints
