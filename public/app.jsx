@@ -278,7 +278,7 @@ function App() {
     const requestId = ++filterRequestIdRef.current;
     setFilterStatus("Loading filters...");
     try {
-      const data = await readJson(await request("/players/filters", { apiKey: key }));
+      const data = await readJson(await request("/api/v1/players/filters", { apiKey: key }));
       if (requestId !== filterRequestIdRef.current) return;
       const filters = data.filters || {};
       setFilterOptions({
@@ -317,7 +317,7 @@ function App() {
 
   async function handleCheckLicense() {
     try {
-      const data = await readJson(await request("/license/check", { apiKey: apiKey.trim() }));
+      const data = await readJson(await request("/api/v1/license/check", { apiKey: apiKey.trim() }));
       setLicenseOutput({ value: data, isError: false });
     } catch (error) {
       setLicenseOutput({ value: error.data || { error: error.message }, isError: true });
@@ -327,7 +327,7 @@ function App() {
   async function handlePushUsage() {
     try {
       const data = await readJson(
-        await request("/usage", {
+        await request("/api/v1/usage", {
           method: "POST",
           apiKey: apiKey.trim(),
           body: { event: "draft_view", timestamp: new Date().toISOString(), metadata: { source: "demo" } },
@@ -348,7 +348,7 @@ function App() {
     try {
       const queryString = params.toString();
       const data = await readJson(
-        await request(`/players${queryString ? `?${queryString}` : ""}`, { apiKey: apiKey.trim() })
+        await request(`/api/v1/players${queryString ? `?${queryString}` : ""}`, { apiKey: apiKey.trim() })
       );
       setPullOutput({ value: null, isError: false });
       setPlayersResult({ ...data, queryString });
