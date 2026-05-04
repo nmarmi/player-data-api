@@ -298,15 +298,23 @@ describe('US-7.4 integration tests for API endpoints', () => {
     expect(afterDraftVals.status).toBe(200);
     expect(afterDraftVals.body.success).toBe(true);
 
-    // Purchased players should be excluded from subsequent valuations.
-    const postIds = new Set(afterDraftVals.body.valuations.map((v) => v.playerId));
-    for (const id of purchasedIds) {
-      expect(postIds.has(id)).toBe(false);
+    // US-5.5: purchased players appear in the response with `purchasePrice` set
+    // (so the Draft Kit can render value-vs-paid in one call). Available players
+    // are flagged with `purchasePrice: null`. Purchased players are still
+    // EXCLUDED from the calibration/computation that drives remaining-pool values.
+    const byId = new Map(afterDraftVals.body.valuations.map((v) => [v.playerId, v]));
+    for (const p of purchased) {
+      const row = byId.get(p.playerId);
+      expect(row).toBeTruthy();
+      expect(row.purchasePrice).toBe(p.price);
+      expect(row.valueGap).toBeCloseTo(row.projectedValue - p.price, 4);
     }
 
-    // As pool shrinks and budgets drop, remaining player values should shift.
+    // As pool shrinks and budgets drop, remaining (available) player values should shift.
     const remainingBefore = initialVals.body.valuations.find((v) => !purchasedIds.has(v.playerId));
-    const remainingAfter = afterDraftVals.body.valuations.find((v) => v.playerId === remainingBefore.playerId);
+    const remainingAfter = afterDraftVals.body.valuations.find(
+      (v) => v.playerId === remainingBefore.playerId && v.purchasePrice === null
+    );
     expect(remainingAfter).toBeTruthy();
     expect(remainingAfter.projectedValue).not.toBe(remainingBefore.projectedValue);
 

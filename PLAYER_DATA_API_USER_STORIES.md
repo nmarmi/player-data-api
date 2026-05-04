@@ -556,6 +556,9 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Tests verify league settings changes affect output
 - **Integration-shape test:** posts a body using the Draft Kit's `leagueSettings` shape (`numberOfTeams`, `salaryCap`, `rosterSlots` map, `scoringType: "5x5 Roto"`) and asserts the engine converges and returns a non-empty `valuations` array
 - **Adapter test:** `normalizeLeagueSettings` (from US-5.3) is tested with both the Draft Kit shape and the legacy engine shape and produces equivalent output for equivalent inputs
+- **US-5.5 output-shape test:** purchased players in the response carry `purchasePrice` (server-resolved from `draftState.purchasedPlayers`) and `valueGap = projectedValue − purchasePrice`; available players carry `purchasePrice: null` and `valueGap: null`
+
+** COMPLETED** (`tests/valuationEngine.test.js` — 7 tests covering all six acceptance criteria.)
 
 ### US-7.4: Integration tests for API endpoints
 **Acceptance criteria:**

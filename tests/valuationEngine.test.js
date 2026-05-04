@@ -232,6 +232,45 @@ describe('valuationEngine (US-7.3)', () => {
     expect(res.body.valuations.length).toBeGreaterThan(0);
   });
 
+  test('US-5.5: purchased players carry purchasePrice and valueGap; available players are null', () => {
+    const leagueSettings = {
+      numberOfTeams: 2,
+      salaryCap: 260,
+      rosterSlots: { C: 1, '1B': 1, '2B': 1, '3B': 1, SS: 1, OF: 3, UTIL: 1, SP: 3, RP: 2, BENCH: 3 },
+      scoringType: '5x5 Roto',
+    };
+
+    // First pass: find a real available player from the live pool the engine returns,
+    // so we can post it back as "purchased" and assert the gap math.
+    const baseline = runValuations(leagueSettings, {});
+    expect(baseline.valuations.length).toBeGreaterThan(2);
+
+    const purchasedAt = 47;
+    const purchasedTarget = baseline.valuations.find((v) => Number(v.projectedValue) > 0);
+    expect(purchasedTarget).toBeTruthy();
+
+    const live = runValuations(leagueSettings, {
+      purchasedPlayers: [
+        { playerId: purchasedTarget.playerId, teamId: 'fantasy-team-1', price: purchasedAt },
+      ],
+      teamBudgets: { 'fantasy-team-1': 213, 'fantasy-team-2': 260 },
+      filledRosterSlots: { 'fantasy-team-1': { OF: 1 } },
+    });
+
+    const purchasedRow = live.valuations.find((v) => v.playerId === purchasedTarget.playerId);
+    expect(purchasedRow).toBeTruthy();
+    expect(purchasedRow.purchasePrice).toBe(purchasedAt);
+    expect(typeof purchasedRow.projectedValue).toBe('number');
+    // valueGap is computed server-side as projectedValue - purchasePrice.
+    expect(purchasedRow.valueGap).toBeCloseTo(purchasedRow.projectedValue - purchasedAt, 4);
+
+    // An available (un-purchased) player must have null purchasePrice / valueGap.
+    const availableRow = live.valuations.find((v) => v.playerId !== purchasedTarget.playerId);
+    expect(availableRow).toBeTruthy();
+    expect(availableRow.purchasePrice).toBeNull();
+    expect(availableRow.valueGap).toBeNull();
+  });
+
   test('adapter: normalizeLeagueSettings matches Draft Kit and legacy equivalent inputs', () => {
     const draftKitShape = {
       numberOfTeams: 10,

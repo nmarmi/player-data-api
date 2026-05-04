@@ -1176,17 +1176,30 @@ function runValuations(leagueSettings = {}, draftState = {}) {
     }
   }
 
-  const valuations = rawValuations.map((v) => {
-    if (purchasedMap.has(v.playerId)) {
-      const purchasePrice = purchasedMap.get(v.playerId);
-      return {
-        ...v,
-        purchasePrice,
-        valueGap: Math.round((v.projectedValue - purchasePrice) * 100) / 100,
-      };
-    }
-    return { ...v, purchasePrice: null, valueGap: null };
-  });
+  // US-5.5: Purchased players must appear in the response with their pre-draft
+  // projectedValue + purchasePrice + valueGap, so the Draft Kit can render the
+  // value-vs-paid view without additional lookups. We compute a baseline pass
+  // over the full (un-excluded) pool only when there are purchases to surface.
+  const baselineByPlayerId = new Map();
+  if (purchasedMap.size > 0) {
+    const baselineRows = computeValuations(allHitters, allPitchers, allPoolPlayers, settings);
+    for (const row of baselineRows) baselineByPlayerId.set(row.playerId, row);
+  }
+
+  const availableValuations = rawValuations.map((v) => ({ ...v, purchasePrice: null, valueGap: null }));
+
+  const purchasedValuations = [];
+  for (const [playerId, purchasePrice] of purchasedMap.entries()) {
+    const base = baselineByPlayerId.get(playerId);
+    if (!base) continue; // unknown player id — skip rather than crash
+    purchasedValuations.push({
+      ...base,
+      purchasePrice,
+      valueGap: Math.round((base.projectedValue - purchasePrice) * 100) / 100,
+    });
+  }
+
+  const valuations = [...availableValuations, ...purchasedValuations];
 
   const hitterCount  = valuations.filter((v) => v.statGroup === 'hitting').length;
   const pitcherCount = valuations.filter((v) => v.statGroup === 'pitching').length;
