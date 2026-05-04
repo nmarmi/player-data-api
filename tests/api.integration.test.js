@@ -56,19 +56,27 @@ describe('US-7.4 integration tests for API endpoints', () => {
       expect(body.apiVersion).toBe('v1');
 
       if (body.players.length > 0) {
-        expect(body.players[0]).toEqual(expect.objectContaining({
+        const sample = body.players[0];
+        expect(sample).toEqual(expect.objectContaining({
           playerId: expect.any(String),
           name: expect.any(String),
           mlbTeam: expect.any(String),
+          mlbTeamId: expect.any(String),
         }));
+        // US-1.1 / US-1.2: ID conventions
+        expect(sample.playerId).toMatch(/^mlb-\d+$/);
+        expect(sample.mlbTeamId).toMatch(/^mlb-\d+$/);
       }
     }
 
+    // US-2.8: legacy routes carry Deprecation, Sunset, and Link headers
     expect(legacy.headers.deprecation).toBe('true');
     expect(legacy.headers.sunset).toBeTruthy();
+    expect(legacy.headers.link).toMatch(/rel="deprecation"/);
 
     expect(versioned.headers.deprecation).toBeUndefined();
     expect(versioned.headers.sunset).toBeUndefined();
+    expect(versioned.headers.link).toBeUndefined();
 
     expect(legacy.body.players.length).toBe(versioned.body.players.length);
     expect(legacy.body.total).toBe(versioned.body.total);
@@ -85,6 +93,7 @@ describe('US-7.4 integration tests for API endpoints', () => {
       playerId,
       name: expect.any(String),
       mlbTeam: expect.any(String),
+      mlbTeamId: expect.stringMatching(/^mlb-\d+$/),
     }));
 
     const pool = await auth(request(app).get('/api/v1/players/pool?position=OF'));

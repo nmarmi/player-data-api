@@ -24,10 +24,19 @@ app.use(cors({ origin: ALLOWED_ORIGIN }));
 app.use(express.json());
 
 // US-2.8: mark legacy unversioned endpoints as deprecated.
+// Adds Deprecation, Sunset, and Link headers so callers can migrate to /api/v1/*.
+// Logs a single warning the first time any legacy route is hit per process.
+const LEGACY_MIGRATION_LINK = process.env.LEGACY_API_MIGRATION_LINK || '</docs/migration-v1.md>; rel="deprecation"';
+let legacyWarningLogged = false;
 app.use((req, res, next) => {
-  if (!req.path.startsWith(`/api/${API_VERSION}/`)) {
+  if (!req.path.startsWith(`/api/${API_VERSION}/`) && req.path !== '/') {
     res.set('Deprecation', 'true');
     res.set('Sunset', LEGACY_SUNSET);
+    res.set('Link', LEGACY_MIGRATION_LINK);
+    if (!legacyWarningLogged) {
+      legacyWarningLogged = true;
+      console.warn(`[deprecation] Legacy unversioned route hit (${req.method} ${req.path}). Migrate clients to /api/${API_VERSION}/* before ${LEGACY_SUNSET}.`);
+    }
   }
   next();
 });

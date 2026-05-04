@@ -78,6 +78,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Ingestion jobs (US-4.1, US-4.4) populate `mlbTeamId` from the `team.id` field of the MLB Stats API response — never inferred from the abbreviation
 - Unit test asserts both fields are present and `mlbTeamId` matches the documented `mlb-{numericId}` regex
 
+** COMPLETED**
+
 ### US-1.3: Align player data shape to PlayerStub model
 **As a** Draft Kit consumer, **I want** the API to return players matching the `PlayerStub` schema, **so that** the Draft Kit can load a player pool without transformation.
 
@@ -100,6 +102,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Seed data loads automatically when no external data source is configured
 - Note: This seed file is the canonical source. The Draft Kit repo imports a copy.
 
+** COMPLETED** (1,694 player records seeded; verified via boot log: "Players table already has 1694 rows".)
+
 ### US-1.5: Update CSV import script to produce new schema
 **As a** developer, **I want** the CSV import script to produce `players.json` in the new `PlayerStub`-compatible format, **so that** imported data immediately works with the updated API.
 
@@ -108,6 +112,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Output includes `playerId` in `mlb-{id}` format
 - Output includes `positions` as an array
 - Script validates required fields and reports skipped rows
+
+** COMPLETED**
 
 ---
 
@@ -143,6 +149,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Team filter accepts multiple values: `?team=LAD,NYY`
 - Results return `PlayerStub` shape
 - Pagination via `limit` and `offset` remains functional
+
+** COMPLETED**
 
 ### US-2.4: Player valuation endpoint (placeholder)
 **As a** Draft Kit, **I want** to request dollar valuations for players given the current draft state, **so that** I can display recommended bid amounts.
@@ -198,6 +206,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Integration test asserts: requesting `GET /players` (legacy) returns the same body as `GET /api/v1/players` AND includes `Deprecation`, `Sunset`, and `Link` response headers
 - Integration test asserts: `GET /api/v1/players` does **not** set the deprecation headers
 - After the sunset date, legacy routes can be removed without code changes in any downstream consumer that followed US-11.5 in the Draft Kit
+
+** COMPLETED**
 
 ### US-2.9: Fix recommendations controller to use the real valuation engine
 **As a** developer, **I want** `POST /players/recommendations` to delegate to `runValuations` from `services/valuationEngine`, **so that** the endpoint doesn't throw at runtime and its output is consistent with `POST /players/valuations`.
@@ -278,6 +288,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Job logs results: players added, updated, unchanged
 - Refresh policy: once per season or on manual trigger
 
+** COMPLETED** (jobs/ingestPlayerMetadata.js; verified live: 30 teams iterated, populates `mlb_team_id` from `team.id`.)
+
 ### US-4.2: Injury status ingestion via roster hydration
 **As a** Draft Kit user, **I want** current injury information reflected in the player pool, **sourced from the free MLB Stats API**.
 
@@ -288,6 +300,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - No API key is required — the MLB Stats API hydration parameter provides injury data on the free tier
 - Refresh policy: every 15–60 minutes during active use, with manual refresh option
 - Stale data is indicated in API response (e.g., `lastUpdated` timestamp)
+
+** COMPLETED** (jobs/ingestInjuries.js + scheduler runs every 30 min in active hours.)
 
 ### US-4.3: Depth chart ingestion from MLB Stats API
 **As a** Draft Kit user, **I want** depth chart context available for players, **so that** I can assess playing time before bidding.
@@ -300,6 +314,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Data is normalized into a consistent format across all teams
 - No API key is required
 
+** COMPLETED** (jobs/ingestDepthCharts.js populates `depth_chart_rank` and `depth_chart_position`; scheduler runs every 6h.)
+
 ### US-4.4: Transaction/roster status ingestion from MLB Stats API
 **As a** Draft Kit user, **I want** recent transactions (call-ups, send-downs, DFA, trades) reflected in the player pool.
 
@@ -311,6 +327,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Transaction history is optionally stored in a `transactions` table for context and audit
 - No API key is required
 
+** COMPLETED** (jobs/ingestTransactions.js + `transactions` table; scheduler runs every 6h.)
+
 ### US-4.5: Manual refresh trigger endpoint
 **As a** Draft Kit user, **I want** to trigger a data refresh on demand.
 
@@ -320,6 +338,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Returns sync results: `{ success: true, sources: [{ source, recordsUpdated, duration }] }`
 - Protected by admin-level auth
 - Since the MLB Stats API has no auth requirement, refreshes should always succeed (barring network issues)
+
+** COMPLETED** (`POST /api/v1/admin/refresh` with optional `source` param; gated by `requireAdmin` middleware.)
 
 ### US-4.6: Scheduled ingestion jobs
 **As a** system, **I want** data syncs to run on a schedule without manual intervention.
@@ -332,6 +352,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Job failures are logged and do not crash the application
 - Rate limiting note: the MLB Stats API is free but undocumented on rate limits; jobs should include polite pacing (200–500ms between requests) and back off on HTTP 429
 
+** COMPLETED** (jobs/scheduler.js — daily for metadata, 6h for depth/txns, 30m for injuries during active hours; runs boot-time staleness check.)
+
 ### US-4.7: Data freshness indicators in API responses
 **As a** Draft Kit developer, **I want** API responses to include data freshness metadata.
 
@@ -339,6 +361,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Player list and detail responses include `dataAsOf` timestamp
 - Valuation responses include `dataAsOf` for both player data and draft state
 - If any data source is stale beyond its threshold, response includes `staleWarnings` array
+
+** COMPLETED** (controllers attach `dataAsOf` and `staleWarnings` from `syncLog.getDataFreshnessMeta()`; verified live: detail response includes warnings for `depth_charts`, `injuries`, `transactions` when sync log is older than threshold.)
 
 ### US-4.8: Season stats ingestion for valuation baseline
 **As a** valuation engine (Epic 5), **I want** historical season stats available per player, **so that** dollar-value projections have real data to work from.
@@ -350,6 +374,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Key columns: `ab`, `r`, `h`, `hr`, `rbi`, `bb`, `k`, `sb`, `avg`, `obp`, `slg` (hitting); `w`, `l`, `era`, `whip`, `k9`, `ip`, `sv` (pitching)
 - Refresh policy: once per season (stats from completed seasons are immutable)
 - No API key is required
+
+** COMPLETED** (jobs/ingestStats.js + `player_stats` table; sync log shows 1,638 records.)
 
 ---
 
