@@ -19,6 +19,7 @@ const { ingestInjuries }       = require('../jobs/ingestInjuries');
 const { ingestDepthCharts }    = require('../jobs/ingestDepthCharts');
 const { ingestTransactions }   = require('../jobs/ingestTransactions');
 const { ingestStats }          = require('../jobs/ingestStats');
+const log = require('../logger').child({ component: 'admin' });
 
 // Map each source name to its job function and the result field that
 // represents "records processed" (each job returns slightly different keys).
@@ -63,7 +64,7 @@ async function runJob(source) {
       durationMs:     Date.now() - t0,
     };
   } catch (err) {
-    console.error(`[admin/refresh] ${source} failed:`, err.message);
+    log.error('refresh job failed', { source, error: err.message, stack: err.stack });
     return {
       source,
       success:        false,
@@ -100,18 +101,20 @@ async function triggerRefresh(req, res) {
     });
   }
 
-  console.log(`[admin/refresh] Running ${sources.length} source(s): ${sources.join(', ')}`);
+  log.info('refresh started', { sources, count: sources.length });
 
   // Run jobs sequentially to avoid hammering the MLB Stats API
   const results = [];
   for (const source of sources) {
-    console.log(`[admin/refresh] Starting ${source}…`);
+    log.info('refresh job starting', { source });
     const result = await runJob(source);
     results.push(result);
-    console.log(
-      `[admin/refresh] ${source} → ${result.success ? 'ok' : 'FAILED'} ` +
-      `(${result.recordsUpdated} records, ${result.durationMs}ms)`
-    );
+    log.info('refresh job complete', {
+      source,
+      success: result.success,
+      recordsUpdated: result.recordsUpdated,
+      durationMs: result.durationMs,
+    });
   }
 
   const anyFailed = results.some((r) => !r.success);

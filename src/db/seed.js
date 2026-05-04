@@ -1,6 +1,7 @@
 const { getDb } = require('./connection');
 const path = require('path');
 const fs = require('fs');
+const log = require('../logger').child({ component: 'db' });
 
 function loadSeedPlayers() {
   const jsonPath = path.join(__dirname, '..', '..', 'data', 'players.json');
@@ -17,7 +18,7 @@ function seedIfEmpty() {
   const count = db.prepare('SELECT COUNT(*) as n FROM players').get().n;
 
   if (count > 0) {
-    console.log(`[db] Players table already has ${count} rows — skipping seed`);
+    log.info('seed skipped', { existingRows: count, reason: 'players table already populated' });
     return;
   }
 
@@ -58,7 +59,7 @@ function seedIfEmpty() {
 
   const seedPlayers = loadSeedPlayers();
   insertMany(seedPlayers);
-  console.log(`[db] Seeded ${seedPlayers.length} players from seed file`);
+  log.info('seeded', { players: seedPlayers.length, source: 'seed file' });
 }
 
 module.exports = { seedIfEmpty };

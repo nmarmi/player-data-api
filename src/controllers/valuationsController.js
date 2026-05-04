@@ -14,6 +14,7 @@ const {
   getExclusionDiagnostics,
 } = require('../services/valuationEngine');
 const { getDataFreshnessMeta }  = require('../db/syncLog');
+const log = require('../logger').child({ component: 'valuations' });
 
 // Sources that feed the valuation engine
 const VALUATION_SOURCES = ['player_metadata', 'player_stats'];
@@ -112,7 +113,7 @@ function getValuations(req, res) {
       ...freshness(),
     });
   } catch (err) {
-    console.error('[valuations] Engine error:', err.message);
+    log.error('engine error', { error: err.message, stack: err.stack });
     return res.status(500).json({
       success: false,
       error: 'Failed to compute valuations',

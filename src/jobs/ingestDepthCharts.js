@@ -36,6 +36,8 @@ const API_BASE = 'https://statsapi.mlb.com/api/v1';
 const SOURCE = 'depth_charts';
 const PACING_MS = 300;
 
+const log = require('../logger').child({ component: 'ingest', source: SOURCE });
+
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
 function sleep(ms) {
@@ -53,7 +55,7 @@ async function fetchJson(url, attempt = 1) {
   if (response.status === 429) {
     if (attempt > 5) throw new Error(`HTTP 429 rate limit exceeded for ${url}`);
     const waitMs = Math.pow(2, attempt) * 1000;
-    console.warn(`[ingest] Rate limited — waiting ${waitMs / 1000}s (attempt ${attempt}/5)`);
+    log.warn('rate limited', { waitSeconds: waitMs / 1000, attempt, maxAttempts: 5 });
     await sleep(waitMs);
     return fetchJson(url, attempt + 1);
   }
@@ -106,7 +108,7 @@ function normalizeDepthChartPosition(abbr) {
  */
 async function buildDepthChartMap() {
   const teams = await fetchTeams();
-  console.log(`[ingest] Fetching depth charts for ${teams.length} teams…`);
+  log.info('fetching depth charts', { teams: teams.length });
 
   // Map<player_id, { rank, position }>
   const depthMap = new Map();
@@ -146,14 +148,11 @@ async function buildDepthChartMap() {
         totalEntries++;
       }
     } catch (err) {
-      console.warn(`[ingest] Skipping depth chart for team ${team.id}: ${err.message}`);
+      log.warn('depth chart skipped', { teamId: team.id, error: err.message });
     }
   }
 
-  console.log(
-    `[ingest] Depth chart map built: ${depthMap.size} unique players ` +
-    `from ${totalEntries} total entries across ${teams.length} teams`
-  );
+  log.info('depth chart map built', { uniquePlayers: depthMap.size, totalEntries, teams: teams.length });
 
   return depthMap;
 }
@@ -217,11 +216,11 @@ function applyDepthChartUpdates(depthMap) {
  */
 async function ingestDepthCharts({ force = false } = {}) {
   if (!force && !isStale(SOURCE)) {
-    console.log(`[ingest] ${SOURCE} is fresh — skipping (use --force to override)`);
+    log.info('skip — fresh', { hint: 'use --force to override' });
     return { skipped: true, updated: 0, cleared: 0, total: 0, durationMs: 0 };
   }
 
-  console.log(`[ingest] Starting ${SOURCE} ingestion…`);
+  log.info('start');
   const start = Date.now();
 
   let depthMap;
@@ -238,17 +237,14 @@ async function ingestDepthCharts({ force = false } = {}) {
     const bucket = rank <= 3 ? String(rank) : '4+';
     rankCounts[bucket] = (rankCounts[bucket] || 0) + 1;
   }
-  console.log('[ingest] Rank distribution (best rank per player):', rankCounts);
+  log.info('rank distribution', { rankCounts });
 
   const { updated, cleared } = applyDepthChartUpdates(depthMap);
   const durationMs = Date.now() - start;
 
   recordSync(SOURCE, 'success', depthMap.size);
 
-  console.log(
-    `[ingest] ${SOURCE} complete in ${durationMs}ms — ` +
-    `depth chart entries updated: ${updated}, cleared (removed from charts): ${cleared}`
-  );
+  log.info('complete', { durationMs, updated, cleared, total: depthMap.size });
 
   return { updated, cleared, total: depthMap.size, durationMs };
 }

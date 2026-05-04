@@ -35,6 +35,8 @@ const { isStale, recordSync } = require('../db/syncLog');
 
 const API_BASE = 'https://statsapi.mlb.com/api/v1';
 const SOURCE = 'player_stats';
+
+const log = require('../logger').child({ component: 'ingest', source: SOURCE });
 const PACING_MS = 300;
 const PAGE_SIZE = 500;
 
@@ -55,7 +57,7 @@ async function fetchJson(url, attempt = 1) {
   if (response.status === 429) {
     if (attempt > 5) throw new Error(`HTTP 429 rate limit exceeded for ${url}`);
     const waitMs = Math.pow(2, attempt) * 1000;
-    console.warn(`[ingest] Rate limited — waiting ${waitMs / 1000}s (attempt ${attempt}/5)`);
+    log.warn('rate limited', { waitSeconds: waitMs / 1000, attempt, maxAttempts: 5 });
     await sleep(waitMs);
     return fetchJson(url, attempt + 1);
   }
@@ -96,7 +98,7 @@ async function fetchStatSplits(group, season) {
 
     if (total === null) {
       total = Number(bucket?.totalSplits) || splits.length;
-      console.log(`[ingest]   ${group}: ${total} total records`);
+      log.debug('paged group total', { group, total });
     }
 
     all.push(...splits);
@@ -240,24 +242,24 @@ function upsertStats(rows) {
  */
 async function ingestStats({ force = false, season, group = 'all' } = {}) {
   if (!force && !isStale(SOURCE)) {
-    console.log(`[ingest] ${SOURCE} is fresh — skipping (use --force to override)`);
+    log.info('skip — fresh', { hint: 'use --force to override' });
     return { skipped: true, hitting: null, pitching: null, durationMs: 0 };
   }
 
   const year = season || (new Date().getFullYear() - 1);
   const groups = group === 'all' ? ['hitting', 'pitching'] : [group];
 
-  console.log(`[ingest] Starting ${SOURCE} ingestion for ${year} season (groups: ${groups.join(', ')})…`);
+  log.info('start', { year, groups });
   const start = Date.now();
 
   const results = {};
 
   for (const g of groups) {
-    console.log(`[ingest] Fetching ${g} stats for ${year}…`);
+    log.info('fetching group stats', { group: g, year });
     let splits;
     try {
       splits = await fetchStatSplits(g, year);
-      console.log(`[ingest]   Fetched ${splits.length} ${g} splits`);
+      log.info('splits fetched', { group: g, count: splits.length });
     } catch (err) {
       recordSync(SOURCE, 'error', 0);
       throw new Error(`Failed to fetch ${g} stats: ${err.message}`);
@@ -266,21 +268,19 @@ async function ingestStats({ force = false, season, group = 'all' } = {}) {
     const rows         = splits.map((s) => splitToRow(s, year, g)).filter(Boolean);
     const skippedCount = splits.length - rows.length;
     if (skippedCount) {
-      console.warn(`[ingest]   Skipped ${skippedCount} ${g} entries (missing player ID)`);
+      log.warn('entries skipped', { group: g, count: skippedCount, reason: 'missing player ID' });
     }
 
     const { inserted, updated } = upsertStats(rows);
     results[g] = { inserted, updated, total: rows.length };
-    console.log(
-      `[ingest]   ${g}: inserted ${inserted}, updated ${updated} (${rows.length} total)`
-    );
+    log.info('group complete', { group: g, inserted, updated, total: rows.length });
   }
 
   const durationMs = Date.now() - start;
   const totalRows  = Object.values(results).reduce((s, r) => s + (r?.total ?? 0), 0);
   recordSync(SOURCE, 'success', totalRows);
 
-  console.log(`[ingest] ${SOURCE} complete in ${durationMs}ms`);
+  log.info('complete', { durationMs, totalRows });
 
   return {
     hitting:  results.hitting  || null,

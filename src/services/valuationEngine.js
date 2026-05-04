@@ -25,6 +25,8 @@
 
 'use strict';
 
+const log = require('../logger').child({ component: 'valuations' });
+
 // Lazily load the DB connection so the file doesn't crash if SQLite is unavailable
 let _getDb = null;
 function tryGetDb() {
@@ -920,7 +922,7 @@ function normalizeLeagueSettings(input = {}) {
       } else if (PITCHER_POSITIONS_SET.has(posKey)) {
         pitcherSlots += n;
       } else {
-        console.warn(`[normalizeLeagueSettings] Unknown position key "${pos}" — ignored`);
+        log.warn('unknown position key — ignored', { context: 'normalizeLeagueSettings', position: pos });
       }
     }
 
@@ -960,7 +962,7 @@ function normalizeLeagueSettings(input = {}) {
 function mergeSettings(leagueSettings = {}) {
   const slotsConfig = parseRosterSlotsConfig(leagueSettings);
   if (slotsConfig.unknownKeys.length) {
-    console.warn('[valuations] Ignoring unknown roster slot keys:', slotsConfig.unknownKeys.join(', '));
+    log.warn('ignoring unknown roster slot keys', { keys: slotsConfig.unknownKeys });
   }
 
   return {

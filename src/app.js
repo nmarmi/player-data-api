@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const log = require('./logger').child({ component: 'app' });
 
 //actual endpoints and handles routing
 const healthRouter  = require('./routes/health');
@@ -35,7 +36,7 @@ app.use((req, res, next) => {
     res.set('Link', LEGACY_MIGRATION_LINK);
     if (!legacyWarningLogged) {
       legacyWarningLogged = true;
-      console.warn(`[deprecation] Legacy unversioned route hit (${req.method} ${req.path}). Migrate clients to /api/${API_VERSION}/* before ${LEGACY_SUNSET}.`);
+      log.warn('legacy route hit', { method: req.method, path: req.path, sunset: LEGACY_SUNSET, hint: `Migrate clients to /api/${API_VERSION}/*` });
     }
   }
   next();
@@ -85,7 +86,7 @@ app.use((req, res) => {
 // 500 — unhandled errors
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, _next) => {
-  console.error('[error]', err);
+  log.error('unhandled error', { error: err.message, stack: err.stack, method: req.method, path: req.path });
   res.status(500).json({ success: false, error: 'Internal server error', code: 'INTERNAL_ERROR' });
 });
 

@@ -33,6 +33,7 @@ const { ingestInjuries }       = require('./ingestInjuries');
 const { ingestDepthCharts }    = require('./ingestDepthCharts');
 const { ingestTransactions }   = require('./ingestTransactions');
 const { ingestStats }          = require('./ingestStats');
+const log = require('../logger').child({ component: 'scheduler' });
 
 // ── Config helpers ─────────────────────────────────────────────────────────────
 
@@ -75,21 +76,18 @@ function isWithinActiveHours(start, end) {
  * @param {object}   [opts]    - options passed to the ingestion job
  */
 async function safeRun(name, fn, opts = {}) {
+  // US-8.2: each ingestion job logs source, records processed, duration, errors.
+  const jobLog = log.child({ source: name });
   try {
     const result = await fn(opts);
     if (result?.skipped) {
-      console.log(`[scheduler] ${name} — skipped (still fresh)`);
+      jobLog.info('skipped', { reason: 'still fresh' });
     } else {
-      const extra = result
-        ? Object.entries(result)
-            .filter(([k]) => !['skipped', 'durationMs'].includes(k))
-            .map(([k, v]) => `${k}=${v}`)
-            .join(' ')
-        : '';
-      console.log(`[scheduler] ${name} — done in ${result?.durationMs ?? '?'}ms${extra ? ' ' + extra : ''}`);
+      const { durationMs, ...rest } = result || {};
+      jobLog.info('done', { durationMs: durationMs ?? null, ...rest });
     }
   } catch (err) {
-    console.error(`[scheduler] ${name} — ERROR: ${err.message}`);
+    jobLog.error('failed', { error: err.message, stack: err.stack });
   }
 }
 
@@ -110,11 +108,11 @@ const MAX_INTERVAL_MS = 24 * 60 * 60 * 1000;
 function createTicker(name, fn, intervalMs, gateCheck = null) {
   const safeMs = Math.min(intervalMs, MAX_INTERVAL_MS);
   if (safeMs !== intervalMs) {
-    console.warn(`[scheduler] ${name}: interval clamped to ${safeMs / 3600000}h (was ${intervalMs / 3600000}h)`);
+    log.warn('interval clamped', { source: name, clampedHours: safeMs / 3600000, requestedHours: intervalMs / 3600000 });
   }
   return setInterval(async () => {
     if (gateCheck && !gateCheck()) {
-      console.log(`[scheduler] ${name} — outside active hours, skipping tick`);
+      log.debug('tick skipped', { source: name, reason: 'outside active hours' });
       return;
     }
     await safeRun(name, fn);
@@ -133,18 +131,18 @@ let _handles = [];
  */
 async function startScheduler() {
   if (_handles.length > 0) {
-    console.log('[scheduler] Already running — ignoring duplicate startScheduler() call');
+    log.info('already running', { active: _handles.length });
     return _handles.length;
   }
 
   const cfg = getConfig();
 
   if (!cfg.enabled) {
-    console.log('[scheduler] Disabled via SCHEDULER_ENABLED=false');
+    log.info('disabled', { reason: 'SCHEDULER_ENABLED=false' });
     return 0;
   }
 
-  console.log('[scheduler] Starting with config:', {
+  log.info('starting', {
     staticIntervalHours:   cfg.staticIntervalHours,
     slowIntervalHours:     cfg.slowIntervalHours,
     injuryIntervalMinutes: cfg.injuryIntervalMinutes,
@@ -158,13 +156,13 @@ async function startScheduler() {
   // ── Boot-time pass: refresh anything stale from the last deploy ─────────────
   // Run without force=true so the staleness check in each job determines
   // whether a network call is actually needed.
-  console.log('[scheduler] Running boot-time staleness check for all sources…');
+  log.info('boot-time staleness check', { sources: ['player_metadata', 'injuries', 'depth_charts', 'transactions', 'player_stats'] });
   await safeRun('player_metadata [boot]', ingestPlayerMetadata);
   await safeRun('injuries [boot]',        ingestInjuries);
   await safeRun('depth_charts [boot]',    ingestDepthCharts);
   await safeRun('transactions [boot]',    ingestTransactions);
   await safeRun('player_stats [boot]',    ingestStats);
-  console.log('[scheduler] Boot-time pass complete');
+  log.info('boot-time pass complete');
 
   // ── Recurring intervals ─────────────────────────────────────────────────────
   _handles.push(createTicker('player_metadata', ingestPlayerMetadata, staticMs));
@@ -180,13 +178,15 @@ async function startScheduler() {
     ),
   );
 
-  console.log(
-    `[scheduler] ${_handles.length} jobs scheduled — ` +
-    `metadata/stats every ${cfg.staticIntervalHours}h, ` +
-    `depth_charts/transactions every ${cfg.slowIntervalHours}h, ` +
-    `injuries every ${cfg.injuryIntervalMinutes}min ` +
-    `(active ${cfg.activeHoursStart}:00–${cfg.activeHoursEnd}:59 local)`
-  );
+  log.info('jobs scheduled', {
+    count: _handles.length,
+    metadataIntervalHours: cfg.staticIntervalHours,
+    statsIntervalHours: cfg.staticIntervalHours,
+    depthChartsIntervalHours: cfg.slowIntervalHours,
+    transactionsIntervalHours: cfg.slowIntervalHours,
+    injuriesIntervalMinutes: cfg.injuryIntervalMinutes,
+    injuriesActiveHours: `${cfg.activeHoursStart}:00–${cfg.activeHoursEnd}:59`,
+  });
 
   return _handles.length;
 }
@@ -197,7 +197,7 @@ async function startScheduler() {
 function stopScheduler() {
   for (const h of _handles) clearInterval(h);
   _handles = [];
-  console.log('[scheduler] Stopped');
+  log.info('stopped');
 }
 
-module.exports = { startScheduler, stopScheduler };
+module.exports = { startScheduler, stopScheduler, getConfig };

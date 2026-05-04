@@ -1,4 +1,5 @@
 const { getDb } = require('./connection');
+const log = require('../logger').child({ component: 'db' });
 
 const SOURCES = ['player_metadata', 'injuries', 'depth_charts', 'transactions', 'player_stats'];
 
@@ -32,7 +33,7 @@ function createSyncLogTable() {
   });
   insertMany(SOURCES);
 
-  console.log('[db] data_sync_log table ready');
+  log.info('data_sync_log table ready');
 }
 
 /**

@@ -35,6 +35,8 @@ const API_BASE = 'https://statsapi.mlb.com/api/v1';
 const SOURCE = 'injuries';
 const PACING_MS = 300;
 
+const log = require('../logger').child({ component: 'ingest', source: SOURCE });
+
 // How many days back to look for supplementary transaction data
 const TRANSACTION_LOOKBACK_DAYS = 7;
 
@@ -55,7 +57,7 @@ async function fetchJson(url, attempt = 1) {
   if (response.status === 429) {
     if (attempt > 5) throw new Error(`HTTP 429 rate limit exceeded for ${url}`);
     const waitMs = Math.pow(2, attempt) * 1000;
-    console.warn(`[ingest] Rate limited — waiting ${waitMs / 1000}s (attempt ${attempt}/5)`);
+    log.warn('rate limited', { waitSeconds: waitMs / 1000, attempt, maxAttempts: 5 });
     await sleep(waitMs);
     return fetchJson(url, attempt + 1);
   }
@@ -177,7 +179,7 @@ function isAvailableStatus(status) {
  */
 async function buildRosterStatusMap() {
   const teams = await fetchTeams();
-  console.log(`[ingest] Scanning 40-man rosters for ${teams.length} teams…`);
+  log.info('scanning 40-man rosters', { teams: teams.length });
 
   const statusMap = new Map();
   for (const team of teams) {
@@ -190,7 +192,7 @@ async function buildRosterStatusMap() {
         statusMap.set(`mlb-${mlbId}`, status);
       }
     } catch (err) {
-      console.warn(`[ingest] Skipping roster for team ${team.id}: ${err.message}`);
+      log.warn('roster skipped', { teamId: team.id, error: err.message });
     }
   }
 
@@ -207,11 +209,11 @@ async function buildTransactionStatusMap() {
   try {
     txns = await fetchRecentStatusChanges();
   } catch (err) {
-    console.warn(`[ingest] Could not fetch transactions (non-fatal): ${err.message}`);
+    log.warn('transactions fetch failed (non-fatal)', { error: err.message });
     return new Map();
   }
 
-  console.log(`[ingest] ${txns.length} Status Change transactions in last ${TRANSACTION_LOOKBACK_DAYS} days`);
+  log.info('status change transactions found', { count: txns.length, lookbackDays: TRANSACTION_LOOKBACK_DAYS });
 
   // Sort oldest → newest so later (more recent) entries win when we iterate
   txns.sort((a, b) => new Date(a.date) - new Date(b.date));
@@ -288,18 +290,18 @@ function applyStatusUpdates(combinedMap) {
  */
 async function ingestInjuries({ force = false } = {}) {
   if (!force && !isStale(SOURCE)) {
-    console.log(`[ingest] ${SOURCE} is fresh — skipping (use --force to override)`);
+    log.info('skip — fresh', { hint: 'use --force to override' });
     return { skipped: true, updated: 0, cleared: 0, nonActive: 0, total: 0, durationMs: 0 };
   }
 
-  console.log(`[ingest] Starting ${SOURCE} ingestion…`);
+  log.info('start');
   const start = Date.now();
 
   // Build status map from primary source (40-man rosters)
   let rosterMap;
   try {
     rosterMap = await buildRosterStatusMap();
-    console.log(`[ingest] Roster map built: ${rosterMap.size} players`);
+    log.info('roster map built', { players: rosterMap.size });
   } catch (err) {
     recordSync(SOURCE, 'error', 0);
     throw new Error(`Failed to build roster status map: ${err.message}`);
@@ -311,10 +313,7 @@ async function ingestInjuries({ force = false } = {}) {
   const combinedMap = new Map([...rosterMap, ...txnMap]);
 
   const nonActive = [...combinedMap.values()].filter((s) => s !== 'active').length;
-  console.log(
-    `[ingest] Combined status map: ${combinedMap.size} players, ` +
-    `${nonActive} non-active (${combinedMap.size - nonActive} active)`
-  );
+  log.info('combined status map', { total: combinedMap.size, nonActive, active: combinedMap.size - nonActive });
 
   // Log a breakdown of non-active statuses
   const breakdown = {};
@@ -322,7 +321,7 @@ async function ingestInjuries({ force = false } = {}) {
     if (status !== 'active') breakdown[status] = (breakdown[status] || 0) + 1;
   }
   if (Object.keys(breakdown).length) {
-    console.log('[ingest] Non-active breakdown:', breakdown);
+    log.info('non-active breakdown', { breakdown });
   }
 
   const { updated, cleared } = applyStatusUpdates(combinedMap);
@@ -330,10 +329,7 @@ async function ingestInjuries({ force = false } = {}) {
 
   recordSync(SOURCE, 'success', nonActive);
 
-  console.log(
-    `[ingest] ${SOURCE} complete in ${durationMs}ms — ` +
-    `statuses updated: ${updated}, recovered (reset to active): ${cleared}`
-  );
+  log.info('complete', { durationMs, updated, cleared });
 
   return { updated, cleared, nonActive, total: combinedMap.size, durationMs };
 }

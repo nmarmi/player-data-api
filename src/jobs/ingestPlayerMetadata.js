@@ -28,6 +28,8 @@ const { isStale, recordSync } = require('../db/syncLog');
 const API_BASE = 'https://statsapi.mlb.com/api/v1';
 const SOURCE = 'player_metadata';
 
+const log = require('../logger').child({ component: 'ingest', source: SOURCE });
+
 // Polite pacing between requests (ms). The MLB Stats API has no published rate
 // limit, so we stay courteous to avoid triggering any undocumented throttling.
 const PACING_MS = 300;
@@ -49,7 +51,7 @@ async function fetchJson(url, attempt = 1) {
   if (response.status === 429) {
     if (attempt > 5) throw new Error(`HTTP 429 rate limit exceeded for ${url}`);
     const waitMs = Math.pow(2, attempt) * 1000;
-    console.warn(`[ingest] Rate limited — waiting ${waitMs / 1000}s (attempt ${attempt}/5)`);
+    log.warn('rate limited', { waitSeconds: waitMs / 1000, attempt, maxAttempts: 5 });
     await sleep(waitMs);
     return fetchJson(url, attempt + 1);
   }
@@ -257,19 +259,19 @@ function upsertPlayers(rows) {
  */
 async function ingestPlayerMetadata({ force = false, season } = {}) {
   if (!force && !isStale(SOURCE)) {
-    console.log(`[ingest] ${SOURCE} is fresh — skipping (use force:true to override)`);
+    log.info('skip — fresh', { hint: 'use force:true to override' });
     return { skipped: true, added: 0, updated: 0, unchanged: 0, total: 0, teams: 0, durationMs: 0 };
   }
 
   const year = season || new Date().getFullYear();
-  console.log(`[ingest] Starting ${SOURCE} ingestion for ${year} season…`);
+  log.info('start', { year });
   const start = Date.now();
 
   // Step 1: fetch all MLB teams
   let teams;
   try {
     teams = await fetchTeams(year);
-    console.log(`[ingest] Found ${teams.length} MLB teams`);
+    log.info('teams fetched', { count: teams.length });
   } catch (err) {
     recordSync(SOURCE, 'error', 0);
     throw new Error(`Failed to fetch MLB teams: ${err.message}`);
@@ -292,14 +294,14 @@ async function ingestPlayerMetadata({ force = false, season } = {}) {
           skippedEntries++;
         }
       }
-      console.log(`[ingest]   ${team.abbreviation}: ${teamCount} players`);
+      log.debug('team roster', { team: team.abbreviation, players: teamCount });
     } catch (err) {
-      console.warn(`[ingest] Skipping ${team.abbreviation} (teamId ${team.id}): ${err.message}`);
+      log.warn('team roster failed', { team: team.abbreviation, teamId: team.id, error: err.message });
     }
   }
 
   if (skippedEntries) {
-    console.warn(`[ingest] Skipped ${skippedEntries} entries (missing required fields)`);
+    log.warn('entries skipped', { count: skippedEntries, reason: 'missing required fields' });
   }
 
   // Deduplicate by player_id — a player traded mid-season appears on both teams;
@@ -307,7 +309,7 @@ async function ingestPlayerMetadata({ force = false, season } = {}) {
   const deduped = [...new Map(allRows.map((r) => [r.player_id, r])).values()];
   const duplicates = allRows.length - deduped.length;
   if (duplicates) {
-    console.log(`[ingest] Deduped ${duplicates} duplicate entries (multi-team players)`);
+    log.info('deduped', { duplicates, reason: 'multi-team players' });
   }
 
   // Step 3: upsert into the database
@@ -316,10 +318,7 @@ async function ingestPlayerMetadata({ force = false, season } = {}) {
 
   recordSync(SOURCE, 'success', deduped.length);
 
-  console.log(
-    `[ingest] ${SOURCE} complete in ${durationMs}ms — ` +
-    `added: ${added}, updated: ${updated}, unchanged: ${unchanged}, total: ${deduped.length}`
-  );
+  log.info('complete', { durationMs, added, updated, unchanged, total: deduped.length });
 
   return { added, updated, unchanged, total: deduped.length, teams: teams.length, durationMs };
 }

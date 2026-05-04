@@ -593,11 +593,15 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - `.env.example` documents every variable with defaults
 - Application logs its active configuration on startup (without secrets)
 
+** COMPLETED** (`.env.example` documents 14 vars across server, auth, CORS, database, legacy-API deprecation, scheduler, and logging; `src/index.js#logActiveConfig` emits the full config as a single structured `info` event on boot — secrets are reported only as counts (e.g. `apiKeysConfigured: 1`, `adminKeyConfigured: false`).)
+
 ### US-8.2: Structured logging
 **Acceptance criteria:**
 - Replace `console.log` with a structured logger (e.g., pino or winston)
 - Log entries include: timestamp, level, message, context
 - Ingestion jobs log: source, records processed, duration, errors
+
+** COMPLETED** (zero-dep `src/logger.js` emits one JSON line per call with `time` (ISO 8601), `level`, `msg`, plus context; supports `child()` for bound context, `LOG_LEVEL` filtering, `LOG_PRETTY=true` for dev-readable output. Migrated boot path, `app.js`, db layer, all five ingestion jobs, scheduler, admin/valuations/recommendations/usage controllers. Per-job summary in `scheduler.safeRun` emits `{ source, durationMs, recordCount, error?, ... }` matching the US-8.2 spec line. Contract verified by `tests/logger.test.js` (5 tests).)
 
 ### US-8.3: API documentation (OpenAPI/Swagger)
 **Acceptance criteria:**

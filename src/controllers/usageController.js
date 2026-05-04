@@ -1,3 +1,5 @@
+const log = require('../logger').child({ component: 'usage' });
+
 let _getSyncStatus = null;
 function trySyncStatus() {
   if (!_getSyncStatus) {
@@ -8,13 +10,11 @@ function trySyncStatus() {
 
 function recordUsage(req, res) {
   const { event, timestamp, metadata } = req.body || {};
-  const payload = {
+  log.info('event', {
     event: event || 'unknown',
     timestamp: timestamp || new Date().toISOString(),
     metadata: metadata || {},
-  };
-
-  console.log('[usage]', JSON.stringify(payload));
+  });
   res.status(200).json({ success: true, message: 'Recorded' });
 }
 

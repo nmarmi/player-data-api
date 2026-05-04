@@ -30,6 +30,8 @@ const { isStale, recordSync } = require('../db/syncLog');
 const API_BASE = 'https://statsapi.mlb.com/api/v1';
 const SOURCE = 'transactions';
 const PACING_MS = 300;
+
+const log = require('../logger').child({ component: 'ingest', source: SOURCE });
 const DEFAULT_LOOKBACK_DAYS = 7;
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
@@ -49,7 +51,7 @@ async function fetchJson(url, attempt = 1) {
   if (response.status === 429) {
     if (attempt > 5) throw new Error(`HTTP 429 rate limit exceeded for ${url}`);
     const waitMs = Math.pow(2, attempt) * 1000;
-    console.warn(`[ingest] Rate limited — waiting ${waitMs / 1000}s (attempt ${attempt}/5)`);
+    log.warn('rate limited', { waitSeconds: waitMs / 1000, attempt, maxAttempts: 5 });
     await sleep(waitMs);
     return fetchJson(url, attempt + 1);
   }
@@ -269,18 +271,18 @@ function applyTransactionUpdates(playerUpdates, rawTxns) {
  */
 async function ingestTransactions({ force = false, lookbackDays = DEFAULT_LOOKBACK_DAYS } = {}) {
   if (!force && !isStale(SOURCE)) {
-    console.log(`[ingest] ${SOURCE} is fresh — skipping (use --force to override)`);
+    log.info('skip — fresh', { hint: 'use --force to override' });
     return { skipped: true, teamUpdated: 0, statusUpdated: 0, txnsInserted: 0, total: 0, durationMs: 0 };
   }
 
-  console.log(`[ingest] Starting ${SOURCE} ingestion (last ${lookbackDays} days)…`);
+  log.info('start', { lookbackDays });
   const start = Date.now();
 
   // Build the MLB team lookup (ID → abbreviation)
   let mlbTeamMap;
   try {
     mlbTeamMap = await fetchMlbTeamMap();
-    console.log(`[ingest] Loaded ${mlbTeamMap.size} MLB teams for lookup`);
+    log.info('mlb teams loaded', { count: mlbTeamMap.size });
   } catch (err) {
     recordSync(SOURCE, 'error', 0);
     throw new Error(`Failed to fetch MLB team list: ${err.message}`);
@@ -296,7 +298,7 @@ async function ingestTransactions({ force = false, lookbackDays = DEFAULT_LOOKBA
   let allTxns;
   try {
     allTxns = await fetchTransactions(startDate, endDate);
-    console.log(`[ingest] Fetched ${allTxns.length} transactions (${startDate} → ${endDate})`);
+    log.info('transactions fetched', { count: allTxns.length, startDate, endDate });
   } catch (err) {
     recordSync(SOURCE, 'error', 0);
     throw new Error(`Failed to fetch transactions: ${err.message}`);
@@ -305,7 +307,7 @@ async function ingestTransactions({ force = false, lookbackDays = DEFAULT_LOOKBA
   // Log the type breakdown for observability
   const typeCounts = {};
   for (const t of allTxns) typeCounts[t.typeDesc] = (typeCounts[t.typeDesc] || 0) + 1;
-  console.log('[ingest] Transaction types:', typeCounts);
+  log.info('transaction types', { typeCounts });
 
   // Sort oldest → newest so later transactions override earlier ones for the
   // same player (e.g., DFA followed by release → final status = 'released')
@@ -345,10 +347,7 @@ async function ingestTransactions({ force = false, lookbackDays = DEFAULT_LOOKBA
     auditTxns.push(txn);
   }
 
-  console.log(
-    `[ingest] Classified: ${playerUpdates.size} players to update, ` +
-    `${auditTxns.length} transactions to audit, ${irrelevant} ignored`
-  );
+  log.info('classified', { playersToUpdate: playerUpdates.size, auditTxns: auditTxns.length, ignored: irrelevant });
 
   const { teamUpdated, statusUpdated, txnsInserted } = applyTransactionUpdates(
     playerUpdates,
@@ -358,11 +357,7 @@ async function ingestTransactions({ force = false, lookbackDays = DEFAULT_LOOKBA
 
   recordSync(SOURCE, 'success', auditTxns.length);
 
-  console.log(
-    `[ingest] ${SOURCE} complete in ${durationMs}ms — ` +
-    `team changes: ${teamUpdated}, status changes: ${statusUpdated}, ` +
-    `audit rows inserted: ${txnsInserted}`
-  );
+  log.info('complete', { durationMs, teamUpdated, statusUpdated, txnsInserted });
 
   return { teamUpdated, statusUpdated, txnsInserted, total: auditTxns.length, durationMs };
 }

@@ -14,6 +14,7 @@
  */
 
 const { runValuations, normalizeLeagueSettings } = require('../services/valuationEngine');
+const log = require('../logger').child({ component: 'recommendations' });
 
 // ── Tier thresholds (returned in every response so the client never re-computes) ──
 const BUY_ABOVE   = 15;   // $15+ projected value → "buy"
@@ -173,7 +174,7 @@ function getRecommendations(req, res) {
   try {
     ({ valuations, meta } = runValuations(normalizedSettings, draftState));
   } catch (err) {
-    console.error('[recommendations] Engine error:', err.message);
+    log.error('engine error', { endpoint: 'recommendations', error: err.message, stack: err.stack });
     return res.status(500).json({
       success: false, error: 'Failed to compute recommendations', code: 'ENGINE_ERROR',
     });
@@ -284,7 +285,7 @@ function getNominations(req, res) {
   try {
     ({ valuations, meta } = runValuations(normalizedSettings, draftState));
   } catch (err) {
-    console.error('[nominations] Engine error:', err.message);
+    log.error('engine error', { endpoint: 'nominations', error: err.message, stack: err.stack });
     return res.status(500).json({
       success: false, error: 'Failed to compute nominations', code: 'ENGINE_ERROR',
     });
@@ -376,7 +377,7 @@ function getBudgetStrategy(req, res) {
   try {
     ({ valuations, meta } = runValuations(normalizedSettings, draftState));
   } catch (err) {
-    console.error('[budget-strategy] Engine error:', err.message);
+    log.error('engine error', { endpoint: 'budget-strategy', error: err.message, stack: err.stack });
     return res.status(500).json({
       success: false, error: 'Failed to compute budget strategy', code: 'ENGINE_ERROR',
     });

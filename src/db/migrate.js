@@ -1,5 +1,6 @@
 const { getDb } = require('./connection');
 const { createSyncLogTable } = require('./syncLog');
+const log = require('../logger').child({ component: 'db' });
 
 /**
  * US-3.2: Creates the players table if it does not already exist.
@@ -104,7 +105,7 @@ function migrate() {
   `);
 
   createSyncLogTable();
-  console.log('[db] Migration complete — all tables ready');
+  log.info('migration complete', { tablesReady: 'all' });
 }
 
 module.exports = { migrate };
