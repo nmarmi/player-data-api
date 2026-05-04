@@ -1,0 +1,483 @@
+openapi: 3.0.3
+info:
+  title: DraftIQ Player Data API
+  version: v1
+  description: |
+    Data backbone for a fantasy baseball auction draft assistant. Owns player
+    identity, stats, ingestion from the public MLB Stats API, and the project's
+    own valuation + recommendation engines.
+
+    Consumed by the Draft Kit repo. The canonical `LeagueSettings` and
+    `DraftState` shapes here (US-5.3 / US-5.4) are the cross-repo contract —
+    the Draft Kit's `toPlayerApiLeagueSettings` and `toPlayerApiDraftState`
+    serializers MUST match these schemas.
+
+  contact:
+    name: DraftIQ
+servers:
+  - url: http://localhost:4001/api/v1
+    description: Local dev
+  - url: https://your-render-deployment.onrender.com/api/v1
+    description: Production
+
+security:
+  - ApiKey: []
+  - BearerAuth: []
+
+paths:
+  /health:
+    get:
+      summary: Liveness + readiness probe
+      description: |
+        Exempt from auth. Reports DB connectivity, last-sync timestamps per
+        ingestion source, and process uptime. Returns 503 when the DB is
+        unreachable.
+      security: []
+      responses:
+        '200': { description: Healthy, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+        '503': { description: DB disconnected, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+
+  /license/check:
+    get:
+      summary: Validate an API key
+      responses:
+        '200': { description: Key valid, content: { application/json: { schema: { type: object, properties: { success: { type: boolean }, valid: { type: boolean } } } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /players:
+    get:
+      summary: Search / filter / paginate the player pool (US-2.3)
+      parameters:
+        - { in: query, name: search,   schema: { type: string } }
+        - { in: query, name: position, description: "Comma-separated, e.g. OF,SS", schema: { type: string } }
+        - { in: query, name: team,     description: "Comma-separated, e.g. LAD,NYY", schema: { type: string } }
+        - { in: query, name: sortBy,   schema: { type: string } }
+        - { in: query, name: sortOrder, schema: { type: string, enum: [asc, desc] } }
+        - { in: query, name: limit,    schema: { type: integer, default: 50 } }
+        - { in: query, name: offset,   schema: { type: integer, default: 0 } }
+      responses:
+        '200':
+          description: List response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  apiVersion: { type: string }
+                  total: { type: integer }
+                  players: { type: array, items: { $ref: '#/components/schemas/PlayerStub' } }
+                  filters: { type: object }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /players/pool:
+    get:
+      summary: Full player pool snapshot (US-2.1)
+      description: Returns every eligible player without pagination. Used by the Draft Kit on draft start.
+      parameters:
+        - { in: query, name: positions, description: "Comma-separated filter", schema: { type: string } }
+      responses:
+        '200':
+          description: Pool
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  apiVersion: { type: string }
+                  players: { type: array, items: { $ref: '#/components/schemas/PlayerStub' } }
+                  dataAsOf: { type: string, nullable: true, format: date-time }
+                  staleWarnings: { type: array, items: { $ref: '#/components/schemas/StaleWarning' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /players/filters:
+    get:
+      summary: Available position + team filter values
+      responses:
+        '200': { description: OK }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /players/{playerId}:
+    get:
+      summary: Single player lookup (US-2.2)
+      parameters:
+        - { in: path, name: playerId, required: true, schema: { type: string, pattern: '^mlb-\d+$' } }
+      responses:
+        '200':
+          description: Found
+          content: { application/json: { schema: { type: object, properties: { success: { type: boolean }, player: { $ref: '#/components/schemas/PlayerStub' }, dataAsOf: { type: string, nullable: true }, staleWarnings: { type: array } } } } }
+        '404': { description: Not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /players/valuations:
+    post:
+      summary: Compute draft-state-aware valuations (US-2.4 / US-5.x)
+      description: |
+        Accepts the canonical `{ leagueSettings, draftState }` body. Returns
+        per-player projected dollar values. Purchased players (per US-5.5)
+        appear in the response with `purchasePrice` set and a `valueGap`
+        of `projectedValue - purchasePrice` so the Draft Kit can render the
+        value-vs-paid view in one call.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leagueSettings, draftState]
+              properties:
+                leagueSettings: { $ref: '#/components/schemas/LeagueSettings' }
+                draftState: { $ref: '#/components/schemas/DraftState' }
+      responses:
+        '200':
+          description: Valuation list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  apiVersion: { type: string }
+                  valuations: { type: array, items: { $ref: '#/components/schemas/Valuation' } }
+                  meta: { type: object }
+                  dataAsOf: { type: string, nullable: true }
+                  staleWarnings: { type: array }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /players/recommendations:
+    post:
+      summary: Best-available recommendations with tier + positional need (US-6.1 / US-6.2)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leagueSettings, draftState]
+              properties:
+                leagueSettings: { $ref: '#/components/schemas/LeagueSettings' }
+                draftState: { $ref: '#/components/schemas/DraftState' }
+                teamId: { type: string, description: "fantasy-team-{n}; required for positional need" }
+                limit: { type: integer, default: 30 }
+      responses:
+        '200':
+          description: Recommendations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  apiVersion: { type: string }
+                  recommendations: { type: array, items: { $ref: '#/components/schemas/Recommendation' } }
+                  thresholds:
+                    type: object
+                    properties:
+                      buyAbove: { type: number }
+                      avoidBelow: { type: number }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /players/recommendations/nominations:
+    post:
+      summary: Nomination suggestions (US-6.3)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leagueSettings, draftState, teamId]
+              properties:
+                leagueSettings: { $ref: '#/components/schemas/LeagueSettings' }
+                draftState: { $ref: '#/components/schemas/DraftState' }
+                teamId: { type: string }
+      responses:
+        '200':
+          description: Nomination list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  nominations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        playerId: { type: string }
+                        name: { type: string }
+                        reason: { type: string }
+                        expectedMarketBid: { type: number }
+                        myTeamNeedScore: { type: number }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /players/recommendations/budget:
+    post:
+      summary: Per-position budget allocation suggestions (US-6.4)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [leagueSettings, draftState, teamId]
+              properties:
+                leagueSettings: { $ref: '#/components/schemas/LeagueSettings' }
+                draftState: { $ref: '#/components/schemas/DraftState' }
+                teamId: { type: string }
+      responses:
+        '200':
+          description: Allocations
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  allocations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        position: { type: string }
+                        suggestedSpend: { type: number }
+                        openSlots: { type: integer }
+                        topTargets:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              playerId: { type: string }
+                              name: { type: string }
+                              projectedValue: { type: number }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /usage:
+    post:
+      summary: Record a client-side usage event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event: { type: string }
+                timestamp: { type: string, format: date-time }
+                metadata: { type: object }
+      responses:
+        '200': { description: Recorded }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /usage/sync-status:
+    get:
+      summary: Returns last-sync metadata for every ingestion source
+      responses:
+        '200': { description: OK }
+        '503': { description: Sync log unavailable }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /admin/refresh:
+    post:
+      summary: Manually trigger ingestion (US-4.5)
+      description: |
+        Requires admin auth via `X-Admin-Key` (or the configured license key when
+        `ADMIN_API_KEY` is unset).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                source:
+                  description: Single source name or array of source names
+                  oneOf:
+                    - { type: string, enum: [player_metadata, injuries, depth_charts, transactions, player_stats] }
+                    - { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: Refresh results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        source: { type: string }
+                        success: { type: boolean }
+                        recordsUpdated: { type: integer }
+                        durationMs: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+components:
+  securitySchemes:
+    ApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    BearerAuth:
+      type: http
+      scheme: bearer
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid API key
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    BadRequest:
+      description: Validation error (may include `fields[]`)
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    RateLimited:
+      description: Per-key rate limit exceeded (US-8.5)
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds until the rate-limit window resets
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        success: { type: boolean, enum: [false] }
+        error: { type: string }
+        code: { type: string }
+        fields:
+          type: array
+          items:
+            type: object
+            properties:
+              field: { type: string }
+              message: { type: string }
+
+    Health:
+      type: object
+      properties:
+        success: { type: boolean }
+        status: { type: string, enum: [ok, degraded] }
+        service: { type: string }
+        database:
+          type: object
+          properties:
+            connected: { type: boolean }
+            error: { type: string }
+        dataFreshness:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              lastSyncAt: { type: string, nullable: true }
+              status: { type: string }
+              isStale: { type: boolean }
+        uptimeSeconds: { type: number }
+
+    PlayerStub:
+      type: object
+      required: [playerId, name, positions, mlbTeam, mlbTeamId, status, isAvailable]
+      properties:
+        playerId: { type: string, pattern: '^mlb-\d+$' }
+        name: { type: string }
+        positions: { type: array, items: { type: string } }
+        mlbTeam: { type: string, description: "Abbreviation (LAD, NYY, …)" }
+        mlbTeamId: { type: string, pattern: '^mlb-\d+$' }
+        status: { type: string, description: "active | IL-10 | IL-60 | DTD | minors | DFA | …" }
+        isAvailable: { type: boolean }
+        depthChartRank: { type: integer, nullable: true }
+        depthChartPosition: { type: string, nullable: true }
+        dataAsOf: { type: string, nullable: true }
+
+    StaleWarning:
+      type: object
+      properties:
+        source: { type: string }
+        lastSyncAt: { type: string, nullable: true }
+        thresholdHours: { type: number }
+
+    # Cross-repo contract — see US-5.3 in PLAYER_DATA_API_USER_STORIES.md.
+    LeagueSettings:
+      type: object
+      required: [numberOfTeams, salaryCap, rosterSlots, scoringType, draftType]
+      properties:
+        numberOfTeams: { type: integer, minimum: 2, maximum: 30 }
+        salaryCap: { type: integer, minimum: 1 }
+        rosterSlots:
+          type: object
+          description: "Position → slot count, e.g. { C:2, '1B':1, OF:5, SP:5, RP:3, BENCH:4 }"
+          additionalProperties: { type: integer }
+        scoringType:
+          type: string
+          enum: ["5x5 Roto", "H2H Categories", "Points"]
+        draftType:
+          type: string
+          enum: ["AUCTION"]
+
+    # Cross-repo contract — see US-5.4. Built server-side by Draft Kit's
+    # toPlayerApiDraftState(session) from US-11.6.
+    DraftState:
+      type: object
+      properties:
+        availablePlayerIds:
+          type: array
+          items: { type: string, pattern: '^mlb-\d+$' }
+        purchasedPlayers:
+          type: array
+          items:
+            type: object
+            required: [playerId, teamId, price]
+            properties:
+              playerId: { type: string }
+              teamId: { type: string, description: "fantasy-team-{n}" }
+              price: { type: number }
+              positionFilled: { type: string, nullable: true }
+        teamBudgets:
+          type: object
+          description: "teamId → remaining $"
+          additionalProperties: { type: number }
+        filledRosterSlots:
+          type: object
+          description: "teamId → position → count"
+          additionalProperties:
+            type: object
+            additionalProperties: { type: integer }
+
+    Valuation:
+      type: object
+      properties:
+        playerId: { type: string }
+        name: { type: string }
+        positions: { type: array, items: { type: string } }
+        mlbTeam: { type: string }
+        statGroup: { type: string, enum: [hitting, pitching, unscored] }
+        projectedValue: { type: number }
+        rank: { type: integer }
+        purchasePrice: { type: number, nullable: true, description: "Set when this player is in draftState.purchasedPlayers" }
+        valueGap: { type: number, nullable: true, description: "projectedValue - purchasePrice; null for available players" }
+
+    Recommendation:
+      type: object
+      properties:
+        playerId: { type: string }
+        name: { type: string }
+        projectedValue: { type: number }
+        recommendedBid: { type: number }
+        rank: { type: integer }
+        tier: { type: string, enum: [buy, fair, avoid] }
+        reason: { type: string }
+        positionalNeed: { type: number, minimum: 0, maximum: 1, description: "Set when teamId is provided" }
+        fillsOpenSlot: { type: boolean }

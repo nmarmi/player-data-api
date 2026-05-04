@@ -94,15 +94,39 @@ Expected CSV columns: `Player,AB,R,H,1B,2B,3B,HR,RBI,BB,K,SB,CS,AVG,OBP,SLG,FPTS
 
 ## Key env vars
 
+See `.env.example` for the complete list with inline docs. Highlights:
+
 | Var | Purpose | Default |
 |-----|---------|---------|
 | `PORT` | Server port | 4001 |
 | `API_LICENSE_KEY` | Single valid API key | (required) |
-| `VALID_API_KEYS` | Comma-separated API keys | — |
-| `ADMIN_KEY` | Admin endpoint key (`X-Admin-Key`) | — |
+| `VALID_API_KEYS` | Comma-separated API keys (preferred for rotation) | — |
+| `ADMIN_API_KEY` | Optional separate admin key; falls back to license keys | — |
 | `ALLOWED_ORIGIN` | CORS origin | `*` |
 | `DB_PATH` | SQLite file path | `data/players.db` |
 | `SCHEDULER_ENABLED` | Enable background ingestion | `true` |
+| `RATE_LIMIT_WINDOW_MS` | Per-key rate-limit window | `60000` |
+| `RATE_LIMIT_MAX_PER_WINDOW` | Requests per window before 429 | `600` |
+| `LOG_LEVEL` | `debug` / `info` / `warn` / `error` | `info` |
+| `LOG_PRETTY` | Set `true` for human-readable dev logs | `false` |
+
+## API key rotation (US-8.5)
+
+The licensed `/api/v1/*` routes accept a key via `X-API-Key: <key>` or `Authorization: Bearer <key>`. `/health` is exempt so external uptime checkers can hit it without a key. Per-key rate limits (`RATE_LIMIT_*`) protect the valuation/recommendation endpoints from accidental DoS during a buggy draft loop — exceeding the limit returns `429` with a `Retry-After` header.
+
+**Issuing a key (dev):** add it to `.env`. Either set `API_LICENSE_KEY=<key>` for a single deployment-wide key, or `VALID_API_KEYS=key1,key2,key3` to support multiple consumers.
+
+**Rotating a key (zero-downtime):** in production, set `VALID_API_KEYS=old-key,new-key` and restart. Both keys work. After every consumer has cut over to `new-key`, set `VALID_API_KEYS=new-key` and restart again — `old-key` is now revoked.
+
+**Revoking a key:** remove it from `VALID_API_KEYS` (or delete `API_LICENSE_KEY` if that's the configured single key) and restart. Cached tokens are evicted on the next request.
+
+**Auth error responses:**
+
+| Condition | Status | Body |
+|---|---|---|
+| No key configured server-side | `500` | `{ success: false, error: "License not configured", code: "LICENSE_NOT_CONFIGURED" }` |
+| Missing/invalid key | `401` | `{ success: false, error: "Invalid or missing license", code: "UNAUTHORIZED" }` |
+| Rate limit exceeded | `429` + `Retry-After` | `{ success: false, error: "Rate limit exceeded — …", code: "RATE_LIMITED", retryAfterSec: <n> }` |
 
 ## Demo UI
 

@@ -57,15 +57,24 @@ app.use((_req, res, next) => {
   //moves onto middleware/routes
 });
 
-// v1 versioned routes
+// US-8.5: Per-key rate limit applied to all licensed routes. /health is mounted
+// before this so external uptime checkers stay exempt.
+const { rateLimitByKey } = require('./middleware/rateLimit');
+
+// /health is exempt from license + rate limit so uptime checkers can hit it.
 app.use(`/api/${API_VERSION}/health`, healthRouter);
+app.use('/health', healthRouter);
+
+// Apply rate limiter ahead of the licensed mounts so 429 fires before route work.
+app.use(rateLimitByKey);
+
+// v1 versioned routes
 app.use(`/api/${API_VERSION}/license`, licenseRouter);
 app.use(`/api/${API_VERSION}/players`, playersRouter);
 app.use(`/api/${API_VERSION}/usage`, usageRouter);
 app.use(`/api/${API_VERSION}/admin`, adminRouter);
 
 // Legacy unversioned routes (aliases — kept for backwards compatibility)
-app.use('/health', healthRouter);
 app.use('/license', licenseRouter);
 app.use('/players', playersRouter);
 app.use('/usage', usageRouter);

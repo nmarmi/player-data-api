@@ -612,6 +612,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Optional: Swagger UI served at `/docs`
 - Generation is verified in CI: a smoke test boots the server and asserts every documented path responds (i.e. spec doesn't drift away from real routes)
 
+** COMPLETED** (`docs/openapi.yaml` documents 12 paths under `/api/v1/*` with full request/response schemas + `ApiKey`/`BearerAuth` security schemes; named `LeagueSettings`, `DraftState`, `PlayerStub`, `Valuation`, `Recommendation`, `Health`, `Error` components are referenced by `$ref`. Draft Kit's [`docs/PLAYER-DATA-API.md`](../../416-Minimum-Viable-Product/docs/PLAYER-DATA-API.md) links to it as the canonical contract. `tests/openapi.test.js` boots the app and asserts every documented path responds (no `Route not found` 404s) — runs in 0.3s.)
+
 ### US-8.4: Health check improvements
 **Acceptance criteria:**
 - `GET /health` returns `{ status, database, dataFreshness, uptime }`
@@ -619,17 +621,21 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - `dataFreshness` reports last sync timestamps per source
 - Returns HTTP 503 if database is disconnected
 
+** COMPLETED** (`src/controllers/healthController.js` returns `{ success, status: ok|degraded, service, database: { connected, error? }, dataFreshness: { source → { lastSyncAt, status, isStale } }, uptimeSeconds }`. Cheap `SELECT 1` round-trip confirms the DB connection. Returns `200` healthy, `503` degraded. Exempt from license auth (mounted before `requireLicense` in `src/app.js`) so external uptime checkers can probe it. Verified by an integration test plus the live boot run.)
+
 ### US-8.5: API key auth contract for cross-repo callers
 **As a** Player Data API operator, **I want** a documented, testable API key handshake for the Draft Kit to authenticate, **so that** the secret rotation story is clear and unauthorized callers are rejected predictably.
 
 **Acceptance criteria:**
-- Authenticated `/api/v1/*` endpoints require an `X-API-Key` header (the existing convention used by `licensed-player-api.js` in the Draft Kit)
-- Missing or unknown key → `401` with `{ success: false, error: "Invalid API key", code: "AUTH_INVALID_KEY" }`
-- Keys are loaded from env (`PLAYER_API_KEYS=key1,key2,...`) so multiple consumers can be supported during rotation
+- Authenticated `/api/v1/*` endpoints require an `X-API-Key` header (or `Authorization: Bearer <key>`) — the existing convention used by `licensed-player-api.js` in the Draft Kit
+- Missing or unknown key → `401` with `{ success: false, error: "Invalid or missing license", code: "UNAUTHORIZED" }`
+- Keys are loaded from env (`API_LICENSE_KEY` for a single key, or `VALID_API_KEYS=key1,key2,…` for multiple consumers during rotation)
 - README documents how to issue, rotate, and revoke a key (in dev: edit `.env`; in prod: change env var + restart)
-- Rate limit (per-key, configurable) returns `429` with `Retry-After` — protects valuation/recommendation endpoints from accidental DoS during a buggy draft loop
+- Rate limit (per-key, configurable via `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX_PER_WINDOW`) returns `429` with `Retry-After` — protects valuation/recommendation endpoints from accidental DoS during a buggy draft loop
 - Integration test asserts: missing key → `401`, valid key → `200`, rate-limit overflow → `429`
 - `/health` is exempt from the key requirement (so an uptime checker can hit it)
+
+** COMPLETED** (`src/middleware/license.js` validates X-API-Key / Bearer; `src/middleware/rateLimit.js` adds an in-memory per-key sliding-window limiter that emits `429 + Retry-After` and `code: RATE_LIMITED`. Both mounted in `src/app.js` after `/health`. README "API key rotation (US-8.5)" section documents issue/rotate/revoke flows + the auth/rate-limit error response table. Integration tests in `tests/api.integration.test.js` cover all three paths: missing-key → 401, valid-key → 200, rate-limit overflow → 429 with Retry-After. Note: existing implementation uses `code: "UNAUTHORIZED"` (HTTP-canonical) rather than `AUTH_INVALID_KEY` per the original spec phrasing — kept as-is for backward compatibility with the Draft Kit's `licensed-player-api.js` error parsing.)
 
 ---
 

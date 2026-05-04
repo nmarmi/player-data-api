@@ -38,6 +38,58 @@ describe('US-7.4 integration tests for API endpoints', () => {
     expect(out.body.code).toBe('UNAUTHORIZED');
   });
 
+  test('US-8.5: per-key rate limit returns 429 with Retry-After when exceeded', async () => {
+    // Reset bucket state and shrink the window so we can hit the limit fast.
+    const { _resetBuckets } = require('../src/middleware/rateLimit');
+    _resetBuckets();
+    const original = { window: process.env.RATE_LIMIT_WINDOW_MS, max: process.env.RATE_LIMIT_MAX_PER_WINDOW };
+    process.env.RATE_LIMIT_WINDOW_MS = '60000';
+    process.env.RATE_LIMIT_MAX_PER_WINDOW = '3';
+
+    try {
+      // Three valid requests should pass.
+      for (let i = 0; i < 3; i++) {
+        const ok = await auth(request(app).get('/api/v1/players?limit=1'));
+        expect(ok.status).toBe(200);
+      }
+      // Fourth must 429 with Retry-After header and proper code.
+      const limited = await auth(request(app).get('/api/v1/players?limit=1'));
+      expect(limited.status).toBe(429);
+      expect(limited.body.success).toBe(false);
+      expect(limited.body.code).toBe('RATE_LIMITED');
+      expect(Number(limited.headers['retry-after'])).toBeGreaterThan(0);
+    } finally {
+      process.env.RATE_LIMIT_WINDOW_MS = original.window || '';
+      process.env.RATE_LIMIT_MAX_PER_WINDOW = original.max || '';
+      _resetBuckets();
+    }
+  });
+
+  test('US-8.5: missing key returns 401 even under rate-limit middleware', async () => {
+    const { _resetBuckets } = require('../src/middleware/rateLimit');
+    _resetBuckets();
+    const out = await request(app).get('/api/v1/players?limit=1'); // no X-API-Key
+    expect(out.status).toBe(401);
+    expect(out.body.code).toBe('UNAUTHORIZED');
+  });
+
+  test('US-8.4: GET /health returns status, database, dataFreshness, uptime — no key required', async () => {
+    const out = await request(app).get('/api/v1/health');
+    expect(out.status).toBe(200);
+    expect(out.body.success).toBe(true);
+    expect(out.body.status).toBe('ok');
+    expect(out.body.service).toBe('player-data-api');
+    expect(out.body.database).toEqual(expect.objectContaining({ connected: true }));
+    expect(typeof out.body.dataFreshness).toBe('object');
+    expect(typeof out.body.uptimeSeconds).toBe('number');
+    expect(out.body.uptimeSeconds).toBeGreaterThanOrEqual(0);
+
+    // /health is exempt from the license requirement — same response with no key.
+    const noKey = await request(app).get('/api/v1/health');
+    expect(noKey.status).toBe(200);
+    expect(noKey.body.success).toBe(true);
+  });
+
   test('GET /players and /api/v1/players return documented response shape', async () => {
     const versioned = await auth(request(app).get('/api/v1/players?limit=3'));
     const legacy = await auth(request(app).get('/players?limit=3'));
