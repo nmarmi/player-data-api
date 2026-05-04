@@ -66,13 +66,17 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - The `/players` endpoint returns `playerId` in the new format
 - Seed data and CSV import both produce the new format
 
+** COMPLETED**
+
 ### US-1.2: Adopt standard MLB team ID format
 **As a** developer, **I want** MLB team references to use the `mlb-{mlbTeamId}` format, **so that** team identity is unambiguous and separate from fantasy team identity.
 
 **Acceptance criteria:**
-- Player records include an `mlbTeamId` field using `mlb-{mlbTeamId}` format
+- Every player record persisted in `players` table / seed includes an `mlbTeamId` column using the `mlb-{numericTeamId}` format (e.g. `mlb-119` for the Dodgers)
 - The human-readable `mlbTeam` abbreviation (e.g., `LAD`) is retained as a display field
-- API responses include both `mlbTeamId` and `mlbTeam`
+- All API responses (`GET /players`, `/players/:id`, `/players/pool`, valuations, recommendations) include both `mlbTeamId` and `mlbTeam`
+- Ingestion jobs (US-4.1, US-4.4) populate `mlbTeamId` from the `team.id` field of the MLB Stats API response — never inferred from the abbreviation
+- Unit test asserts both fields are present and `mlbTeamId` matches the documented `mlb-{numericId}` regex
 
 ### US-1.3: Align player data shape to PlayerStub model
 **As a** Draft Kit consumer, **I want** the API to return players matching the `PlayerStub` schema, **so that** the Draft Kit can load a player pool without transformation.
@@ -83,6 +87,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - `status` holds a placeholder value (e.g., `"active"`) for now
 - `isAvailable` defaults to `true`
 - Legacy stat fields (`ab`, `r`, `h`, etc.) remain available but are not required in the stub response
+
+** COMPLETED**
 
 ### US-1.4: Create a rich seed dataset
 **As a** Draft Kit developer working before API integration is complete, **I want** a local seed dataset of 300+ realistic player stubs, **so that** the Draft Kit can function with a full-sized player pool.
@@ -116,6 +122,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Supports optional `positions` filter to pre-filter by eligibility
 - Response is fast enough for initial draft load (<2s for 500 players)
 
+** COMPLETED**
+
 ### US-2.2: Single player lookup endpoint
 **As a** Draft Kit, **I want** to look up a single player by ID, **so that** I can fetch details for a specific player during the draft.
 
@@ -123,6 +131,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - `GET /players/:playerId` returns a single player record
 - Returns 404 with `{ success: false, error: "Player not found" }` if ID doesn't exist
 - Response includes full player data (stub fields + any available stats)
+
+** COMPLETED**
 
 ### US-2.3: Player search endpoint (refine existing)
 **As a** Draft Kit user, **I want** to search players by name, team, or position, **so that** I can quickly find who I'm looking for during a live draft.
@@ -144,6 +154,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Endpoint exists and returns data even if logic is naive — the contract is what matters
 - Draft state includes: `availablePlayerIds`, `teamBudgets`, `rosterSlots`
 
+** COMPLETED**
+
 ### US-2.5: Player recommendation endpoint (placeholder)
 **As a** Draft Kit, **I want** to request draft recommendations based on current draft state, **so that** I can see value picks and nomination suggestions.
 
@@ -153,6 +165,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Response shape: `{ success: true, recommendations: [{ playerId, recommendedBid, reason }] }`
 - Endpoint exists with placeholder logic — the contract is what matters
 
+** COMPLETED**
+
 ### US-2.6: API versioning strategy
 **As a** developer, **I want** the API to support versioning from the start, **so that** breaking changes don't silently break the Draft Kit.
 
@@ -160,6 +174,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - All endpoints are accessible under `/api/v1/...`
 - Legacy unversioned routes continue to work as aliases (or are removed)
 - Response includes an `apiVersion` field or header
+
+** COMPLETED**
 
 ### US-2.7: Standardize API error responses
 **As a** Draft Kit developer, **I want** consistent error response shapes across all endpoints, **so that** error handling in the client is predictable.
@@ -169,13 +185,18 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - 400 for bad requests, 401 for auth failures, 404 for not found, 500 for server errors
 - Validation errors include field-level detail where applicable
 
+** COMPLETED**
+
 ### US-2.8: Deprecate legacy unversioned routes
 **As a** Draft Kit developer, **I want** a clear deprecation path for the unversioned `/players`, `/usage`, `/health`, `/license`, `/admin` routes, **so that** the client can migrate to `/api/v1/*` without surprise breakage.
 
 **Acceptance criteria:**
-- Every response from a legacy (unversioned) route sets a `Deprecation: true` header and a `Sunset: <RFC 7231 date>` header pointing at a documented cutover date
-- README advertises `/api/v1/*` as the supported surface and lists the legacy routes as deprecated
-- Server logs a single warning per process lifetime the first time a legacy route is hit (so we can watch it drain without log spam)
+- Every response from a legacy (unversioned) route sets a `Deprecation: true` header and a `Sunset` header containing an RFC 7231 IMF-fixdate (e.g. `Sunset: Wed, 30 Sep 2026 00:00:00 GMT`); the actual sunset date is configurable via env var `LEGACY_SUNSET_DATE` and documented in README
+- A `Link` header points at the migration doc: `Link: </docs/migration-v1.md>; rel="deprecation"`
+- README's "API Surface" section advertises `/api/v1/*` as the supported surface and lists the legacy routes as deprecated, with the same sunset date
+- Server logs a single `warn`-level entry per process lifetime the first time a legacy route is hit (so the route can drain without log spam)
+- Integration test asserts: requesting `GET /players` (legacy) returns the same body as `GET /api/v1/players` AND includes `Deprecation`, `Sunset`, and `Link` response headers
+- Integration test asserts: `GET /api/v1/players` does **not** set the deprecation headers
 - After the sunset date, legacy routes can be removed without code changes in any downstream consumer that followed US-11.5 in the Draft Kit
 
 ### US-2.9: Fix recommendations controller to use the real valuation engine
@@ -186,6 +207,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - When `player_stats` is populated, recommendations are derived from the same `runValuations` output that `/players/valuations` returns
 - When `player_stats` is empty, the placeholder fallback still works (same behavior as `/players/valuations`)
 - Integration test: `POST /api/v1/players/recommendations` with a minimal body returns `200` with a `recommendations` array (no 500)
+
+** COMPLETED**
 
 ---
 
@@ -200,6 +223,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Application starts and connects to the database on boot
 - Fallback to seed data if database is empty
 
+** COMPLETED**
+
 ### US-3.2: Player table schema
 **As a** developer, **I want** a `players` table matching the `PlayerStub` + stats model.
 
@@ -208,6 +233,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Optional stats columns or a separate `player_stats` table
 - Migration script creates the table
 - Seed script populates initial data
+
+** COMPLETED**
 
 ### US-3.3: Refactor playersService to use database
 **As a** developer, **I want** the players service to query the database instead of loading a JSON file.
@@ -218,6 +245,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - JSON fallback remains as a degraded mode for development without a DB
 - No performance regression
 
+** COMPLETED**
+
 ### US-3.4: Data ingestion table for tracking sync state
 **As a** developer, **I want** a table that tracks when each data source was last synced, **so that** the refresh policy can be implemented correctly.
 
@@ -225,6 +254,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Table: `data_sync_log` with `source`, `last_sync_at`, `status`, `record_count`
 - Sources include: `player_metadata`, `injuries`, `depth_charts`, `transactions`
 - Service can check whether a refresh is needed based on staleness thresholds
+
+** COMPLETED**
 
 ---
 
@@ -336,6 +367,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Model uses player stats/projections as input
 - This is the project's own model
 
+** COMPLETED**
+
 ### US-5.2: Positional scarcity adjustment
 **As a** Draft Kit user, **I want** valuations to account for positional scarcity.
 
@@ -347,6 +380,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - **Integration contract:** `leagueSettings.rosterSlots` is accepted as **either** a flat integer (legacy placeholder shape) **or** a position map matching the Draft Kit's `DraftSession.leagueSettings.rosterSlots` (e.g. `{ "C":2, "1B":1, "2B":1, "3B":1, "SS":1, "OF":5, "UTIL":1, "SP":5, "RP":3, "BENCH":4 }`)
 - When a position map is supplied, the engine derives `hitterSlotsPerTeam` and `pitcherSlotsPerTeam` by partitioning the map keys (hitters: `C, 1B, 2B, 3B, SS, OF, UTIL, DH`; pitchers: `SP, RP, P`; `BENCH` is split proportionally or ignored, documented in code)
 - Unknown position keys are logged and ignored rather than crashing
+
+** COMPLETED**
 
 ### US-5.3: League-settings-aware valuations
 **As a** Draft Kit user with custom league settings, **I want** valuations to adjust to my specific league format.
@@ -368,6 +403,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
   | `draftType`          | ignored                   | must equal `"AUCTION"`                                         |
 - The engine's legacy field names (`numTeams`, `budget`, `hitterBudgetPct`, `hitterSlotsPerTeam`, `pitcherSlotsPerTeam`, `hittingCategories`, `pitchingCategories`, `statSeason`, `minAB`, `minIP`) are still accepted as overrides for backward compatibility and for internal callers
 - A single adapter function `normalizeLeagueSettings(input)` implements the mapping and is unit-tested with both shapes
+
+** COMPLETED**
 
 ### US-5.4: Draft-state-aware dynamic re-valuation
 **As a** Draft Kit user mid-draft, **I want** remaining player values to update based on what has already been purchased.
@@ -400,6 +437,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - `availablePlayerIds` is authoritative — purchased players are excluded even if not in `purchasedPlayers[]`
 - Missing / empty `draftState` is treated as pre-draft and returns the static baseline valuation
 
+** COMPLETED**
+
 ### US-5.5: Value comparison view data
 **As a** Draft Kit user, **I want** to see each player's projected value alongside their purchase price.
 
@@ -409,6 +448,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Includes a `valueGap` field (`projectedValue - purchasePrice`) for purchased players only
 - Available players return `purchasePrice: null` and `valueGap: null`
 - Enables the Draft Kit to display "value" vs "paid" comparisons without additional lookups
+
+** COMPLETED**
 
 ---
 
@@ -425,6 +466,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Response shape: `{ success: true, recommendations: [{ playerId, name, projectedValue, recommendedBid, rank, tier, reason }], thresholds: { buyAbove, avoidBelow } }`
 - `tier` is one of `"buy" | "fair" | "avoid"` — client renders color without re-computing
 
+** COMPLETED**
+
 ### US-6.2: Positional need recommendations
 **As a** Draft Kit user, **I want** recommendations that consider which roster slots I still need to fill.
 
@@ -436,6 +479,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Recommendations balance overall value with positional need (documented weighting)
 - Returns `400` with `code: "UNKNOWN_TEAM"` if `teamId` isn't present in `draftState.teamBudgets`
 
+** COMPLETED**
+
 ### US-6.3: Nomination suggestions
 **As a** Draft Kit user, **I want** suggestions for which players to nominate (put up for auction).
 
@@ -446,6 +491,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - **Required inputs:** `availablePlayerIds`, `teamBudgets`, `filledRosterSlots`, `teamId` — the endpoint does **not** need `purchasedPlayers` detail (only aggregate budget state)
 - Documented strategy in README: ranks available players by `(expectedMarketBid − myTeamValueToFill)` descending
 
+** COMPLETED**
+
 ### US-6.4: Budget strategy recommendations
 **As a** Draft Kit user, **I want** guidance on how to allocate my remaining budget.
 
@@ -455,6 +502,8 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Accounts for remaining player pool quality at each position
 - `openSlots` per position is derived from `filledRosterSlots[teamId]` vs `leagueSettings.rosterSlots`
 - Adjusts as the draft progresses (stateless — each call reflects the `draftState` in the request)
+
+** COMPLETED**
 
 ---
 
@@ -515,9 +564,12 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 
 ### US-8.3: API documentation (OpenAPI/Swagger)
 **Acceptance criteria:**
-- OpenAPI 3.x spec file exists
-- Spec covers all endpoints, request/response schemas, auth requirements
+- OpenAPI 3.x spec at `docs/openapi.yaml` (checked into the repo, not generated at runtime only)
+- Spec covers all `/api/v1/*` endpoints, request/response schemas, auth requirements (`X-API-Key`)
+- Spec includes the canonical `leagueSettings` and `draftState` shapes from US-5.3 / US-5.4 as named components, so the Draft Kit can reference them by `$ref`
+- A copy of the spec (or a stable URL link to it) is referenced in the Draft Kit's `docs/` so cross-repo changes have a paper trail
 - Optional: Swagger UI served at `/docs`
+- Generation is verified in CI: a smoke test boots the server and asserts every documented path responds (i.e. spec doesn't drift away from real routes)
 
 ### US-8.4: Health check improvements
 **Acceptance criteria:**
@@ -525,6 +577,18 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - `database` reports connected/disconnected
 - `dataFreshness` reports last sync timestamps per source
 - Returns HTTP 503 if database is disconnected
+
+### US-8.5: API key auth contract for cross-repo callers
+**As a** Player Data API operator, **I want** a documented, testable API key handshake for the Draft Kit to authenticate, **so that** the secret rotation story is clear and unauthorized callers are rejected predictably.
+
+**Acceptance criteria:**
+- Authenticated `/api/v1/*` endpoints require an `X-API-Key` header (the existing convention used by `licensed-player-api.js` in the Draft Kit)
+- Missing or unknown key → `401` with `{ success: false, error: "Invalid API key", code: "AUTH_INVALID_KEY" }`
+- Keys are loaded from env (`PLAYER_API_KEYS=key1,key2,...`) so multiple consumers can be supported during rotation
+- README documents how to issue, rotate, and revoke a key (in dev: edit `.env`; in prod: change env var + restart)
+- Rate limit (per-key, configurable) returns `429` with `Retry-After` — protects valuation/recommendation endpoints from accidental DoS during a buggy draft loop
+- Integration test asserts: missing key → `401`, valid key → `200`, rate-limit overflow → `429`
+- `/health` is exempt from the key requirement (so an uptime checker can hit it)
 
 ---
 
@@ -605,7 +669,7 @@ These are the shapes both repos must agree on. They are defined by US-5.3, US-5.
 |----------|---------|-----------|
 | Must do now | 1.1–1.5, 2.1–2.3, 2.6–2.7, 9.1–9.3 | 1 |
 | Next | 2.4–2.5, 3.1–3.4, 7.1–7.2, 7.4, 8.1 | 2–3 |
-| Integration cleanup | 2.8, 2.9 | 3 |
+| Integration cleanup | 2.8, 2.9, 8.5 | 3 |
 | Then | 4.1–4.8, 8.2, 8.4 | 4 |
 | Later | 5.1–5.5, 6.1–6.4, 7.3, 7.5, 8.3 | 5 |
-| **Total** | **47 stories** | |
+| **Total** | **48 stories** | |
