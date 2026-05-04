@@ -541,12 +541,16 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - `npm test` script added to `package.json`
 - At least one passing smoke test exists
 
+** COMPLETED** (Jest + supertest; `npm test` runs 85 tests across `tests/smoke.test.js`, `playersService.test.js`, `valuationEngine.test.js`, `api.integration.test.js`.)
+
 ### US-7.2: Unit tests for playersService
 **Acceptance criteria:**
 - Tests cover: search matching, team filtering, position filtering, numeric range filtering
 - Tests cover: sort by each sortable field, sort order (asc/desc)
 - Tests cover: pagination (limit/offset)
 - Tests cover: edge cases (empty query, no results, invalid params)
+
+** COMPLETED** (`tests/playersService.test.js` covers all four bullets.)
 
 ### US-7.3: Unit tests for valuation engine
 **Acceptance criteria:**
@@ -566,14 +570,18 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 - Tests verify response shapes match documented contracts (US-5.3, US-5.4, US-6.1–6.4)
 - Tests verify auth middleware rejects unauthenticated requests
 - Tests verify error responses for invalid inputs — including Draft-Kit-shaped bodies with missing `rosterSlots` or unknown `teamId` → `400` with field-level `fields: []` detail
-- Tests verify versioned (`/api/v1/*`) and legacy unversioned routes behave identically, and the legacy routes set the `Deprecation` + `Sunset` headers from US-2.8
+- Tests verify versioned (`/api/v1/*`) and legacy unversioned routes behave identically, and the legacy routes set the `Deprecation` + `Sunset` + `Link` headers from US-2.8
+
+** COMPLETED** (`tests/api.integration.test.js` — covers all six endpoints + auth + error fields + deprecation headers.)
 
 ### US-7.5: State transition tests for draft-aware endpoints
 **Acceptance criteria:**
 - Test sends sequential valuation requests with increasingly filled draft states
-- Verifies purchased players are excluded from results
-- Verifies remaining player values shift as pool shrinks
-- Verifies budget constraints are reflected in recommendations
+- Verifies purchased players appear in the response with `purchasePrice` set (per US-5.5) so the Draft Kit can render value-vs-paid in one call, while remaining-pool calibration excludes them
+- Verifies remaining (available) player values shift as pool shrinks
+- Verifies budget constraints are reflected in recommendations (high-budget vs low-budget recommendations differ)
+
+** COMPLETED** (the "US-7.5: sequential draft-state transitions update valuations and recommendations" test in `api.integration.test.js` exercises all four bullets, updated to match the corrected US-5.5 contract.)
 
 ---
 
