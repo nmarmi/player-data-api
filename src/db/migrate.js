@@ -115,6 +115,31 @@ function migrate() {
     )
   `);
 
+  // US-10.1: developer account model
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS developer_accounts (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      email         TEXT    NOT NULL UNIQUE,
+      password_hash TEXT    NOT NULL,
+      is_admin      INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
+  // US-10.1: issued API keys (one account → many keys)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS api_keys (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id   INTEGER NOT NULL REFERENCES developer_accounts(id),
+      key_hash     TEXT    NOT NULL UNIQUE,
+      label        TEXT    NOT NULL DEFAULT '',
+      ip_whitelist TEXT    NOT NULL DEFAULT '[]',
+      revoked_at   TEXT,
+      last_used_at TEXT,
+      created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   createSyncLogTable();
   log.info('migration complete', { tablesReady: 'all' });
 }

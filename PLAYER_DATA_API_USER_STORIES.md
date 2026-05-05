@@ -720,7 +720,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 
 > The current `requireLicense` middleware accepts a flat `API_LICENSE_KEY` / `VALID_API_KEYS` env var. This epic moves issuance and revocation behind a real account model with a developer-facing UI, so the rubric's "complete mediation" line item is satisfied.
 
-### US-10.1: Developer account model + auth
+### US-10.1: Developer account model + auth ✅ COMPLETED
 **As a** Player Data API operator, **I want** a `DeveloperAccount` table with email, hashed password, and a relation to issued API keys, **so that** every key in circulation is traceable to a known account.
 
 **Acceptance criteria:**
@@ -729,6 +729,8 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 - Migration script + seed for a single bootstrap admin developer (configurable via env)
 - Existing `requireLicense` keeps working: hashed-key lookup against `api_keys` where `revoked_at IS NULL` and `now()` < expiry, attaches `req.developerAccount` for downstream audit
 - Backwards compatible: legacy `API_LICENSE_KEY` env still works as a "system key" until removed in a follow-up
+
+**Implementation:** `src/db/migrate.js` adds `developer_accounts` + `api_keys` tables. `src/db/developerAccounts.js` provides `createAccount`, `createKey`, `findKeyByRaw`, `touchKey`, `hashPassword`, `verifyPassword`. `src/db/seedAdmin.js` seeds a bootstrap admin on first start (configurable via `ADMIN_EMAIL`/`ADMIN_PASSWORD` env; logs the raw key once). `src/middleware/license.js` updated — DB key lookup first (SHA-256 hash match, attaches `req.developerAccount`), legacy env fallback second. 95/95 tests pass.
 
 ### US-10.2: Front-end UI for developer account create/login
 **As a** developer wanting access, **I want** a hosted page (`/developer-portal`) where I can create an account and sign in, **so that** the API doesn't depend on an out-of-band onboarding email.

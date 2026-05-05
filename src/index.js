@@ -2,6 +2,7 @@ const app = require('./app');
 const { getDb, DB_PATH } = require('./db/connection');
 const { migrate } = require('./db/migrate');
 const { seedIfEmpty } = require('./db/seed');
+const { seedAdmin } = require('./db/seedAdmin');
 const { startScheduler, getConfig: getSchedulerConfig } = require('./jobs/scheduler');
 const log = require('./logger');
 
@@ -48,6 +49,7 @@ try {
   log.info('db connected', { dbPath: DB_PATH });
   migrate();
   seedIfEmpty();
+  seedAdmin();
   dbReady = true;
 } catch (err) {
   log.error('db init failed', { error: err.message });
