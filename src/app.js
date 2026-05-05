@@ -1,8 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
 const log = require('./logger').child({ component: 'app' });
+const pkg = require('../package.json');
 
 //actual endpoints and handles routing
 const healthRouter  = require('./routes/health');
@@ -80,11 +80,27 @@ app.use('/players', playersRouter);
 app.use('/usage', usageRouter);
 app.use('/admin', adminRouter);
 
-app.use(express.static(path.join(__dirname, '..', 'public')));
-
-//root route
+// US-9.1: Production API serves only JSON. The demo UI lives in
+// `examples/demo-ui/` and is hosted separately (see vercel.json). The Express
+// server no longer mounts a static-file middleware.
 app.get('/', (_req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+  res.json({
+    success: true,
+    service: 'player-data-api',
+    name: pkg.name,
+    version: pkg.version,
+    apiVersion: API_VERSION,
+    docs: '/docs/openapi.yaml',
+    health: `/api/${API_VERSION}/health`,
+    endpoints: {
+      players:         `/api/${API_VERSION}/players`,
+      pool:            `/api/${API_VERSION}/players/pool`,
+      valuations:      `/api/${API_VERSION}/players/valuations`,
+      recommendations: `/api/${API_VERSION}/players/recommendations`,
+      license:         `/api/${API_VERSION}/license/check`,
+      admin:           `/api/${API_VERSION}/admin/refresh`,
+    },
+  });
 });
 
 // 404 — unknown route

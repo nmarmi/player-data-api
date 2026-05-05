@@ -690,6 +690,8 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 - The root `/` route returns API info JSON instead of serving HTML
 - Static file middleware is removed from production config
 
+** COMPLETED** (`public/` removed entirely; `index.html`, `app.jsx`, `styles.css`, `favicon.ico` relocated to `examples/demo-ui/` via `git mv` so history is preserved. Added `examples/demo-ui/README.md` documenting the move + how to run the demo locally. `src/app.js` no longer imports `path`, dropped `app.use(express.static(...))`, and the root route now returns API info JSON: `{ success, service, name, version, apiVersion, docs, health, endpoints: { players, pool, valuations, recommendations, license, admin } }`. `vercel.json` updated to point `outputDirectory` at `examples/demo-ui` so the hosted demo at `player-data-api.vercel.app` keeps working. README's "Demo UI", "Deployment", and "Project structure" sections updated to reference the new path. **Verified live**: `GET /` returns the JSON shape; `GET /index.html` returns `404 NOT_FOUND` (no static fallback); `GET /api/v1/health` unchanged. **95/95 tests still passing.**)
+
 ### US-9.2: Remove usage tracking endpoint (or scope it)
 **Acceptance criteria:**
 - If kept: endpoint renamed to `/api/v1/analytics/usage` and events persisted

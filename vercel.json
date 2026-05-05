@@ -1,5 +1,5 @@
 {
-  "outputDirectory": "public",
+  "outputDirectory": "examples/demo-ui",
   "rewrites": [
     { "source": "/(.*)", "destination": "https://player-data-api.onrender.com/$1" }
   ]

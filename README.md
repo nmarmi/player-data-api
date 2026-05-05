@@ -130,12 +130,16 @@ The licensed `/api/v1/*` routes accept a key via `X-API-Key: <key>` or `Authoriz
 
 ## Demo UI
 
-Live at **https://player-data-api.vercel.app** — or run locally at `http://localhost:4001`.
+The demo lives at **https://player-data-api.vercel.app** and the source is in
+[`examples/demo-ui/`](./examples/demo-ui/) (relocated per US-9.1 — the
+production Express server is now JSON-only and does not serve HTML).
 
 1. **License check** — validates your API key
 2. **Pull players** — search, filter, and sort the full player list
 3. **Push usage** — logs a sample event
 4. **Valuations** — runs the z-score auction engine for your league settings
+
+To run the demo locally, see [`examples/demo-ui/README.md`](./examples/demo-ui/README.md).
 
 ## Deployment
 
@@ -144,15 +148,15 @@ The API runs as two separate services:
 | Layer | Platform | Purpose |
 |---|---|---|
 | Backend (Express + SQLite + scheduler) | [Render](https://render.com) | Always-on, persistent disk for `players.db` |
-| Demo frontend (`public/`) | [Vercel](https://vercel.com) | Static site; proxies `/api/*` to Render |
+| Demo frontend (`examples/demo-ui/`) | [Vercel](https://vercel.com) | Static site; proxies `/api/*` to Render |
 
-**Vercel** serves `public/` as a static site and transparently proxies all `/api/*` requests to the Render service (configured in `vercel.json`). The browser only ever talks to the Vercel domain — no CORS config needed for the demo UI, and cookie-based auth (planned) works without cross-origin issues.
+**Vercel** serves `examples/demo-ui/` as a static site and transparently proxies all `/api/*` requests to the Render service (configured in `vercel.json`). The browser only ever talks to the Vercel domain — no CORS config needed for the demo UI, and cookie-based auth (planned) works without cross-origin issues.
 
 **Render** is configured via `render.yaml`. On first deploy, the DB is created at `/data/players.db`, seeded from `data/players.json`, and the scheduler immediately ingests fresh data from the MLB Stats API. The disk at `/data` persists across redeploys.
 
 To deploy:
 1. Connect the repo to Render — it auto-detects `render.yaml`. Set `API_LICENSE_KEY` and `ADMIN_KEY` in the Render dashboard.
-2. Connect the repo to Vercel — it auto-detects `outputDirectory: "public"` in `vercel.json`. No env vars needed.
+2. Connect the repo to Vercel — it auto-detects `outputDirectory: "examples/demo-ui"` in `vercel.json`. No env vars needed.
 
 **External apps** (non-browser) should call the Render service URL directly: `https://player-data-api.onrender.com`.
 
@@ -175,10 +179,11 @@ src/
     syncLog.js              data_sync_log table helpers
   middleware/
     license.js              requireLicense / requireAdmin middleware
-public/
-  index.html                Demo UI shell
-  app.jsx                   React demo app (no build step; Babel CDN)
-  styles.css                Demo UI styles
+examples/
+  demo-ui/                  Static demo UI (relocated per US-9.1)
+    index.html              Demo UI shell
+    app.jsx                 React demo app (no build step; Babel CDN)
+    styles.css              Demo UI styles
 data/
   players.db                SQLite database (primary store)
   players.json              Seed/fallback player list
