@@ -25,7 +25,10 @@ function verifyPassword(password, stored) {
 
 /**
  * Look up an API key by its raw value.
- * Returns `{ keyRow, account }` when valid, or `null` when not found / revoked.
+ * Returns `{ status, keyRow?, account? }`:
+ *   status = 'valid'     — key found and not revoked
+ *   status = 'revoked'   — key found but revoked
+ *   status = 'not_found' — key hash not in DB (or DB unavailable)
  */
 function findKeyByRaw(rawKey) {
   try {
@@ -34,17 +37,18 @@ function findKeyByRaw(rawKey) {
       SELECT k.*, a.email, a.is_admin
       FROM   api_keys k
       JOIN   developer_accounts a ON a.id = k.account_id
-      WHERE  k.key_hash   = ?
-        AND  k.revoked_at IS NULL
+      WHERE  k.key_hash = ?
     `).get(hashKey(rawKey));
 
-    if (!keyRow) return null;
+    if (!keyRow) return { status: 'not_found' };
+    if (keyRow.revoked_at) return { status: 'revoked', keyRow };
     return {
+      status: 'valid',
       keyRow,
       account: { id: keyRow.account_id, email: keyRow.email, isAdmin: Boolean(keyRow.is_admin) },
     };
   } catch (_) {
-    return null;
+    return { status: 'not_found' };
   }
 }
 
@@ -83,6 +87,47 @@ function createAccount(email, password, isAdmin = false) {
   return info.lastInsertRowid;
 }
 
+/**
+ * List all active (non-revoked) keys for an account.
+ * Never returns the raw key or its hash.
+ */
+function listKeys(accountId) {
+  try {
+    const rows = getDb().prepare(`
+      SELECT id, label, ip_whitelist, last_used_at, created_at
+      FROM   api_keys
+      WHERE  account_id = ? AND revoked_at IS NULL
+      ORDER  BY created_at DESC
+    `).all(accountId);
+    return rows.map((r) => ({
+      id:          r.id,
+      label:       r.label,
+      ipWhitelist: JSON.parse(r.ip_whitelist || '[]'),
+      lastUsedAt:  r.last_used_at,
+      createdAt:   r.created_at,
+    }));
+  } catch (_) {
+    return [];
+  }
+}
+
+/**
+ * Revoke a key by id, scoped to owning account.
+ * Returns true when revoked, false when not found or already revoked.
+ */
+function revokeKeyById(keyId, accountId) {
+  try {
+    const info = getDb().prepare(`
+      UPDATE api_keys
+      SET    revoked_at = datetime('now')
+      WHERE  id = ? AND account_id = ? AND revoked_at IS NULL
+    `).run(keyId, accountId);
+    return info.changes > 0;
+  } catch (_) {
+    return false;
+  }
+}
+
 /** Returns the account row by email, or null. */
 function findAccountByEmail(email) {
   try {
@@ -99,6 +144,8 @@ module.exports = {
   findKeyByRaw,
   touchKey,
   createKey,
+  listKeys,
+  revokeKeyById,
   createAccount,
   findAccountByEmail,
 };

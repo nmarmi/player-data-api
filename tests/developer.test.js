@@ -152,3 +152,123 @@ describe('US-10.2 Developer auth flow', () => {
     expect(res.body.account.email).toBe(email);
   });
 });
+
+describe('US-10.3 API key management', () => {
+  const email    = `keys-${Date.now()}@example.com`;
+  const password = 'keysTest99';
+  let sessionCookie = null;
+  let createdKeyId  = null;
+  let rawKey        = null;
+
+  beforeAll(async () => {
+    const res = await request(app)
+      .post('/api/v1/developer/register')
+      .send({ email, password });
+    sessionCookie = extractCookie(res);
+  });
+
+  test('GET /keys — returns empty list for new account', async () => {
+    const res = await request(app)
+      .get('/api/v1/developer/keys')
+      .set('Cookie', sessionCookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.keys).toEqual([]);
+  });
+
+  test('GET /keys — returns 401 without session', async () => {
+    const res = await request(app).get('/api/v1/developer/keys');
+    expect(res.status).toBe(401);
+  });
+
+  test('POST /keys — creates key, returns raw value once', async () => {
+    const res = await request(app)
+      .post('/api/v1/developer/keys')
+      .set('Cookie', sessionCookie)
+      .send({ label: 'test-key' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.success).toBe(true);
+    expect(typeof res.body.key).toBe('string');
+    expect(res.body.key.length).toBeGreaterThan(20);
+    expect(res.body.label).toBe('test-key');
+    expect(res.body.id).toBeDefined();
+
+    createdKeyId = res.body.id;
+    rawKey       = res.body.key;
+  });
+
+  test('GET /keys — lists the new key without raw value', async () => {
+    const res = await request(app)
+      .get('/api/v1/developer/keys')
+      .set('Cookie', sessionCookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.keys).toHaveLength(1);
+
+    const k = res.body.keys[0];
+    expect(k.id).toBe(createdKeyId);
+    expect(k.label).toBe('test-key');
+    expect(k).not.toHaveProperty('key');
+    expect(k).not.toHaveProperty('key_hash');
+    expect(k).toHaveProperty('ipWhitelist');
+    expect(k).toHaveProperty('createdAt');
+  });
+
+  test('raw key authenticates licensed endpoints', async () => {
+    const res = await request(app)
+      .get('/api/v1/license/check')
+      .set('X-API-Key', rawKey);
+
+    expect([200, 400]).toContain(res.status); // not 401
+    expect(res.body.code).not.toBe('UNAUTHORIZED');
+    expect(res.body.code).not.toBe('KEY_REVOKED');
+  });
+
+  test('DELETE /keys/:id — revokes the key', async () => {
+    const res = await request(app)
+      .delete(`/api/v1/developer/keys/${createdKeyId}`)
+      .set('Cookie', sessionCookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  test('revoked key returns 401 KEY_REVOKED on licensed endpoint', async () => {
+    const res = await request(app)
+      .get('/api/v1/license/check')
+      .set('X-API-Key', rawKey);
+
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('KEY_REVOKED');
+  });
+
+  test('GET /keys — revoked key no longer appears in list', async () => {
+    const res = await request(app)
+      .get('/api/v1/developer/keys')
+      .set('Cookie', sessionCookie);
+
+    expect(res.status).toBe(200);
+    expect(res.body.keys).toHaveLength(0);
+  });
+
+  test('DELETE /keys/:id — already-revoked key returns 404', async () => {
+    const res = await request(app)
+      .delete(`/api/v1/developer/keys/${createdKeyId}`)
+      .set('Cookie', sessionCookie);
+
+    expect(res.status).toBe(404);
+    expect(res.body.code).toBe('NOT_FOUND');
+  });
+
+  test('POST /keys — ipWhitelist must be an array', async () => {
+    const res = await request(app)
+      .post('/api/v1/developer/keys')
+      .set('Cookie', sessionCookie)
+      .send({ label: 'bad', ipWhitelist: 'not-an-array' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('INVALID_INPUT');
+  });
+});

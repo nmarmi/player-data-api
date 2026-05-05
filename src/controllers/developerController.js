@@ -1,4 +1,4 @@
-const { createAccount, findAccountByEmail, verifyPassword, createKey, findKeyByRaw } = require('../db/developerAccounts');
+const { createAccount, findAccountByEmail, verifyPassword, createKey, listKeys, revokeKeyById } = require('../db/developerAccounts');
 const { setSession, clearSession } = require('../middleware/session');
 const log = require('../logger').child({ component: 'developer' });
 
@@ -72,4 +72,45 @@ function logout(req, res) {
   return res.json({ success: true, message: 'Logged out' });
 }
 
-module.exports = { register, login, me, logout };
+function issueKey(req, res) {
+  const { id: accountId } = req.session;
+  const { label = '', ipWhitelist = [] } = req.body || {};
+
+  if (!Array.isArray(ipWhitelist)) {
+    return res.status(400).json({ success: false, error: 'ipWhitelist must be an array', code: 'INVALID_INPUT' });
+  }
+
+  try {
+    const { rawKey, id, label: savedLabel } = createKey(accountId, label, ipWhitelist);
+    log.info('api key created', { accountId, keyId: id, label: savedLabel });
+    return res.status(201).json({ success: true, key: rawKey, id, label: savedLabel });
+  } catch (err) {
+    log.error('key creation failed', { error: err.message });
+    return res.status(500).json({ success: false, error: 'Key creation failed', code: 'INTERNAL_ERROR' });
+  }
+}
+
+function getKeys(req, res) {
+  const { id: accountId } = req.session;
+  const keys = listKeys(accountId);
+  return res.json({ success: true, keys });
+}
+
+function deleteKey(req, res) {
+  const { id: accountId } = req.session;
+  const keyId = Number(req.params.id);
+
+  if (!keyId) {
+    return res.status(400).json({ success: false, error: 'Invalid key id', code: 'INVALID_INPUT' });
+  }
+
+  const revoked = revokeKeyById(keyId, accountId);
+  if (!revoked) {
+    return res.status(404).json({ success: false, error: 'Key not found or already revoked', code: 'NOT_FOUND' });
+  }
+
+  log.info('api key revoked', { accountId, keyId });
+  return res.json({ success: true, message: 'Key revoked' });
+}
+
+module.exports = { register, login, me, logout, issueKey, getKeys, deleteKey };

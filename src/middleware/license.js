@@ -41,10 +41,13 @@ function requireLicense(req, res, next) {
 
   // 1. DB lookup — api_keys table (US-10.1)
   const found = findKeyByRaw(key);
-  if (found) {
+  if (found.status === 'valid') {
     touchKey(found.keyRow.id);
     req.developerAccount = found.account;
     return next();
+  }
+  if (found.status === 'revoked') {
+    return res.status(401).json({ success: false, error: 'API key has been revoked', code: 'KEY_REVOKED' });
   }
 
   // 2. Legacy env fallback — API_LICENSE_KEY / VALID_API_KEYS
@@ -77,7 +80,7 @@ function requireAdmin(req, res, next) {
   // Also allow DB keys belonging to admin accounts
   if (key) {
     const found = findKeyByRaw(key);
-    if (found && found.account.isAdmin) {
+    if (found.status === 'valid' && found.account.isAdmin) {
       touchKey(found.keyRow.id);
       req.developerAccount = found.account;
       return next();

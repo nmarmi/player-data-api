@@ -744,7 +744,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 
 **Implementation:** Stateless signed-cookie session via `src/middleware/session.js` (HMAC-SHA256, no external dep). `src/controllers/developerController.js` + `src/routes/developer.js` implement register/login/me/logout. Password min-length 8 enforced; scrypt hashing (64-byte, salted). Static UI at `public/developer-portal/index.html` (register, sign-in, and "My Keys" dashboard tabs). `tests/developer.test.js` covers all 12 register → login → /me → logout scenarios. 107/107 tests pass.
 
-### US-10.3: Front-end UI for API key generation
+### US-10.3: Front-end UI for API key generation ✅ COMPLETED
 **As a** signed-in developer, **I want** a "Create new key" button on my dashboard that returns the raw key once (and never again), **so that** I have a self-service path to spin up a new credential.
 
 **Acceptance criteria:**
@@ -753,6 +753,8 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 - UI surfaces the raw key in a copy-to-clipboard banner with a "I've saved this — won't be shown again" confirm gate
 - Listing endpoint `GET /api/v1/developer/keys` returns `{ id, label, ipWhitelist, lastUsedAt, createdAt }` (no key value)
 - Revocation endpoint `DELETE /api/v1/developer/keys/:id` sets `revoked_at = now()`; subsequent requests with that key fail `401 KEY_REVOKED`
+
+**Implementation:** `developerAccounts.js` gains `listKeys(accountId)` and `revokeKeyById(keyId, accountId)`. `findKeyByRaw` now returns `{ status: 'valid'|'revoked'|'not_found' }` so `requireLicense` can emit `KEY_REVOKED` vs `UNAUTHORIZED`. Controller functions `issueKey`, `getKeys`, `deleteKey` added; routes mounted under `/api/v1/developer/keys`. UI from US-10.2 already had the copy-to-clipboard raw key banner. `tests/developer.test.js` extended with 10 new key management tests (create → list → use → revoke → revoked-401 flow). 117/117 tests pass.
 
 ### US-10.4: Audit trail tying every key use back to its account
 **As a** Player Data API operator, **I want** every authenticated request logged with the issuing account + key, **so that** when a key is abused I can trace the blast radius.
