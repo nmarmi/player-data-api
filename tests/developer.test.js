@@ -272,3 +272,100 @@ describe('US-10.3 API key management', () => {
     expect(res.body.code).toBe('INVALID_INPUT');
   });
 });
+
+describe('US-10.5 IP whitelisting', () => {
+  const email    = `ip-${Date.now()}@example.com`;
+  const password = 'ipTest99!';
+  let sessionCookie = null;
+  let rawKey        = null;
+  let keyId         = null;
+
+  beforeAll(async () => {
+    const reg = await request(app)
+      .post('/api/v1/developer/register')
+      .send({ email, password });
+    sessionCookie = extractCookie(reg);
+
+    const key = await request(app)
+      .post('/api/v1/developer/keys')
+      .set('Cookie', sessionCookie)
+      .send({ label: 'ip-test', ipWhitelist: [] });
+    rawKey = key.body.key;
+    keyId  = key.body.id;
+  });
+
+  test('(a) no whitelist — all IPs pass', async () => {
+    const res = await request(app)
+      .get('/api/v1/license/check')
+      .set('X-API-Key', rawKey);
+
+    expect(res.status).not.toBe(401);
+    expect(res.body.code).not.toBe('IP_NOT_ALLOWED');
+  });
+
+  test('PATCH /keys/:id — sets IP whitelist', async () => {
+    const res = await request(app)
+      .patch(`/api/v1/developer/keys/${keyId}`)
+      .set('Cookie', sessionCookie)
+      .send({ ipWhitelist: ['203.0.113.0/24'] });
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.ipWhitelist).toEqual(['203.0.113.0/24']);
+  });
+
+  test('(b) whitelist set, IP mismatch — returns 401 IP_NOT_ALLOWED', async () => {
+    // supertest requests arrive from 127.0.0.1, not in 203.0.113.0/24
+    const res = await request(app)
+      .get('/api/v1/license/check')
+      .set('X-API-Key', rawKey);
+
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBe('IP_NOT_ALLOWED');
+  });
+
+  test('(c) CIDR match — request IP in allowed block passes', async () => {
+    // Simulate a request from 203.0.113.5 via X-Forwarded-For with TRUST_PROXY
+    const orig = process.env.TRUST_PROXY;
+    process.env.TRUST_PROXY = 'true';
+
+    const res = await request(app)
+      .get('/api/v1/license/check')
+      .set('X-API-Key', rawKey)
+      .set('X-Forwarded-For', '203.0.113.5');
+
+    process.env.TRUST_PROXY = orig || '';
+
+    expect(res.status).not.toBe(401);
+    expect(res.body.code).not.toBe('IP_NOT_ALLOWED');
+  });
+
+  test('PATCH /keys/:id — clears whitelist (empty array restores all-IPs access)', async () => {
+    await request(app)
+      .patch(`/api/v1/developer/keys/${keyId}`)
+      .set('Cookie', sessionCookie)
+      .send({ ipWhitelist: [] });
+
+    const res = await request(app)
+      .get('/api/v1/license/check')
+      .set('X-API-Key', rawKey);
+
+    expect(res.status).not.toBe(401);
+    expect(res.body.code).not.toBe('IP_NOT_ALLOWED');
+  });
+
+  test('PATCH /keys/:id — wrong account returns 404', async () => {
+    // Register a different account and try to patch the first account's key
+    const other = await request(app)
+      .post('/api/v1/developer/register')
+      .send({ email: `other-${Date.now()}@example.com`, password: 'other1234' });
+    const otherCookie = extractCookie(other);
+
+    const res = await request(app)
+      .patch(`/api/v1/developer/keys/${keyId}`)
+      .set('Cookie', otherCookie)
+      .send({ ipWhitelist: ['1.2.3.4'] });
+
+    expect(res.status).toBe(404);
+  });
+});

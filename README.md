@@ -128,6 +128,22 @@ See `.env.example` for the complete list. Highlights:
 | `RATE_LIMIT_MAX_PER_WINDOW` | Requests per window before 429 | `600` |
 | `LOG_LEVEL` | `debug` / `info` / `warn` / `error` | `info` |
 | `LOG_PRETTY` | Set `true` for human-readable dev logs | `false` |
+| `TRUST_PROXY` | Set `true` to read client IP from `X-Forwarded-For` | `false` |
+| `SESSION_SECRET` | HMAC secret for developer portal session cookies | (random per restart) |
+| `ADMIN_EMAIL` | Bootstrap admin account email | `admin@localhost` |
+| `ADMIN_PASSWORD` | Bootstrap admin account password | `changeme` |
+
+## IP whitelisting
+
+API keys issued through the developer portal can be locked to specific IP addresses or CIDR blocks. When a key has a non-empty whitelist, any request from an IP not on the list returns `401 IP_NOT_ALLOWED`.
+
+**Hosted deploys (Render, Vercel proxy):** set `TRUST_PROXY=true` so the server reads the real client IP from the `X-Forwarded-For` header rather than the proxy's internal IP. Without this, every request appears to come from the proxy and a non-empty whitelist will block everything.
+
+```
+TRUST_PROXY=true   # required on Render / behind any reverse proxy
+```
+
+**Local dev:** leave `TRUST_PROXY` unset. The IP is read directly from the socket.
 
 ## API key rotation
 

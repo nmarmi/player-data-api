@@ -1,4 +1,4 @@
-const { createAccount, findAccountByEmail, verifyPassword, createKey, listKeys, revokeKeyById } = require('../db/developerAccounts');
+const { createAccount, findAccountByEmail, verifyPassword, createKey, listKeys, revokeKeyById, updateKeyWhitelist } = require('../db/developerAccounts');
 const { setSession, clearSession } = require('../middleware/session');
 const log = require('../logger').child({ component: 'developer' });
 
@@ -113,4 +113,25 @@ function deleteKey(req, res) {
   return res.json({ success: true, message: 'Key revoked' });
 }
 
-module.exports = { register, login, me, logout, issueKey, getKeys, deleteKey };
+function patchKey(req, res) {
+  const { id: accountId } = req.session;
+  const keyId = Number(req.params.id);
+  const { ipWhitelist } = req.body || {};
+
+  if (!keyId) {
+    return res.status(400).json({ success: false, error: 'Invalid key id', code: 'INVALID_INPUT' });
+  }
+  if (!Array.isArray(ipWhitelist)) {
+    return res.status(400).json({ success: false, error: 'ipWhitelist must be an array', code: 'INVALID_INPUT' });
+  }
+
+  const updated = updateKeyWhitelist(keyId, accountId, ipWhitelist);
+  if (!updated) {
+    return res.status(404).json({ success: false, error: 'Key not found or revoked', code: 'NOT_FOUND' });
+  }
+
+  log.info('key whitelist updated', { accountId, keyId, ipWhitelist });
+  return res.json({ success: true, id: keyId, ipWhitelist });
+}
+
+module.exports = { register, login, me, logout, issueKey, getKeys, deleteKey, patchKey };

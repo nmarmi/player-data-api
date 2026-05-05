@@ -7,6 +7,7 @@
  */
 const { findKeyByRaw, touchKey } = require('../db/developerAccounts');
 const { logKeyUse } = require('../db/auditLog');
+const { ipAllowed } = require('../utils/ipMatch');
 const log = require('../logger').child({ component: 'license' });
 
 function getEnvKeys() {
@@ -50,6 +51,13 @@ function requireLicense(req, res, next) {
   // 1. DB lookup — api_keys table (US-10.1)
   const found = findKeyByRaw(key);
   if (found.status === 'valid') {
+    // US-10.5: IP whitelist check before accepting the key
+    const whitelist = JSON.parse(found.keyRow.ip_whitelist || '[]');
+    const requestIp = getRequestIp(req);
+    if (!ipAllowed(requestIp, whitelist)) {
+      return res.status(401).json({ success: false, error: 'IP address not allowed', code: 'IP_NOT_ALLOWED' });
+    }
+
     touchKey(found.keyRow.id);
     req.developerAccount = found.account;
 

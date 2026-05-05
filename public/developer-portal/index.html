@@ -168,6 +168,17 @@
       if (status === 200) loadKeys();
     }
 
+    function openEditWhitelist(id, currentList) {
+      const current = currentList.join(', ');
+      const raw = prompt('Enter allowed IPs or CIDR blocks, comma-separated.\nLeave blank to allow all IPs.\n\nExamples: 1.2.3.4   or   10.0.0.0/24, 203.0.113.5', current);
+      if (raw === null) return; // cancelled
+      const ipWhitelist = raw.split(',').map(s => s.trim()).filter(Boolean);
+      api('PATCH', '/keys/' + id, { ipWhitelist }).then(({ status, data }) => {
+        if (status === 200) { loadKeys(); }
+        else { alert(data.error || 'Failed to update whitelist'); }
+      });
+    }
+
     async function loadKeys() {
       const { status, data } = await api('GET', '/keys');
       const container = document.getElementById('keys-list');
@@ -179,7 +190,10 @@
           <div>
             <div class="key-label">${escHtml(k.label || 'Unnamed')}</div>
             <div class="key-meta">Created ${new Date(k.createdAt).toLocaleDateString()} · Last used ${k.lastUsedAt ? new Date(k.lastUsedAt).toLocaleDateString() : 'never'}</div>
-            ${k.ipWhitelist?.length ? `<div class="key-meta">IPs: ${escHtml(k.ipWhitelist.join(', '))}</div>` : ''}
+            <div class="key-meta">
+              IPs: ${k.ipWhitelist?.length ? escHtml(k.ipWhitelist.join(', ')) : '<em>all allowed</em>'}
+              &nbsp;<button style="background:none;border:none;color:#38bdf8;cursor:pointer;font-size:0.8rem;padding:0" onclick="openEditWhitelist(${k.id}, ${JSON.stringify(k.ipWhitelist || [])})">Edit</button>
+            </div>
           </div>
           <button class="danger" onclick="revokeKey(${k.id})">Revoke</button>
         </div>`).join('');

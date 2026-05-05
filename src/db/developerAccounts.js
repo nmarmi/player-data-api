@@ -137,6 +137,23 @@ function findAccountByEmail(email) {
   }
 }
 
+/**
+ * US-10.5: Update the ip_whitelist for a key, scoped to the owning account.
+ * Returns true when updated, false when not found or wrong account.
+ */
+function updateKeyWhitelist(keyId, accountId, ipWhitelist) {
+  try {
+    const info = getDb().prepare(`
+      UPDATE api_keys
+      SET    ip_whitelist = ?
+      WHERE  id = ? AND account_id = ? AND revoked_at IS NULL
+    `).run(JSON.stringify(ipWhitelist), keyId, accountId);
+    return info.changes > 0;
+  } catch (_) {
+    return false;
+  }
+}
+
 module.exports = {
   hashKey,
   hashPassword,
@@ -146,6 +163,7 @@ module.exports = {
   createKey,
   listKeys,
   revokeKeyById,
+  updateKeyWhitelist,
   createAccount,
   findAccountByEmail,
 };

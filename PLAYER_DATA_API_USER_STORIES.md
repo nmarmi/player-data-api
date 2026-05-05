@@ -768,7 +768,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 
 **Implementation:** `src/db/migrate.js` adds `api_key_usage_log` table. `src/db/auditLog.js` provides `logKeyUse` (writes row + prunes rows > 30 days) and `getKeyUsage`. `requireLicense` schedules a `res.on('finish', ...)` hook after DB-key auth — emits structured log with `accountId`/`keyId` (row id, not raw key) and writes to `api_key_usage_log`. Admin route `GET /api/v1/admin/keys/:keyId/usage` added; OpenAPI spec updated. `api.integration.test.js` gains `last_used_at` bump assertion. 118/118 tests pass.
 
-### US-10.5: IP address whitelisting per key
+### US-10.5: IP address whitelisting per key ✅ COMPLETED
 **As a** developer, **I want** to scope each key to one or more IP addresses or CIDR blocks, **so that** a leaked key from a server with a fixed IP can't be used elsewhere.
 
 **Acceptance criteria:**
@@ -777,6 +777,8 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 - UI: the key list shows the whitelist; "Edit" opens a dialog to update it
 - README documents the trust-proxy expectation for hosted deploys (Render, Vercel rewrites, etc.)
 - Integration tests cover (a) no whitelist → all IPs pass, (b) whitelist mismatch → `401 IP_NOT_ALLOWED`, (c) CIDR match → pass
+
+**Implementation:** `src/utils/ipMatch.js` — pure-Node IPv4 exact-match + CIDR matching (no deps). `requireLicense` parses `ip_whitelist` after finding a valid key; mismatched IP → `401 IP_NOT_ALLOWED` before `touchKey`. `updateKeyWhitelist(keyId, accountId, ipWhitelist)` added to `developerAccounts.js`. `PATCH /api/v1/developer/keys/:id` endpoint added (session-gated, ownership-scoped). Developer portal UI shows whitelist per key with an inline "Edit" link that opens a prompt dialog. README documents `TRUST_PROXY=true` requirement for Render/proxy deploys. 6 new tests cover all three AC scenarios plus clear-whitelist and wrong-account cases. 124/124 tests pass.
 
 ---
 
