@@ -2,12 +2,12 @@
  * US-10.1: requireLicense checks API keys against the DB api_keys table first,
  * then falls back to the legacy API_LICENSE_KEY / VALID_API_KEYS env vars.
  *
- * On DB hit: attaches req.developerAccount = { id, email, isAdmin } and bumps
- * api_keys.last_used_at so the audit trail stays current.
- *
- * On env hit: req.developerAccount is left undefined (legacy system key).
+ * US-10.4: On successful DB-key auth, schedules a usage log write after the
+ * response finishes and enriches structured log entries with accountId/keyId.
  */
 const { findKeyByRaw, touchKey } = require('../db/developerAccounts');
+const { logKeyUse } = require('../db/auditLog');
+const log = require('../logger').child({ component: 'license' });
 
 function getEnvKeys() {
   const single = process.env.API_LICENSE_KEY;
@@ -28,6 +28,14 @@ function getKeyFromRequest(req) {
 // Legacy alias so callers that imported getValidKeys still work.
 const getValidKeys = getEnvKeys;
 
+function getRequestIp(req) {
+  if (process.env.TRUST_PROXY === 'true') {
+    const forwarded = req.get('X-Forwarded-For');
+    if (forwarded) return forwarded.split(',')[0].trim();
+  }
+  return req.socket?.remoteAddress || null;
+}
+
 function requireLicense(req, res, next) {
   const key = getKeyFromRequest(req);
 
@@ -44,8 +52,32 @@ function requireLicense(req, res, next) {
   if (found.status === 'valid') {
     touchKey(found.keyRow.id);
     req.developerAccount = found.account;
+
+    // US-10.4: write usage log after response, never block the request
+    const keyId     = found.keyRow.id;
+    const accountId = found.account.id;
+    const keyTail   = String(keyId).slice(-4); // last 4 chars of id for log cross-ref
+    res.on('finish', () => {
+      log.info('authed request', {
+        accountId,
+        keyId: keyTail,
+        method: req.method,
+        path:   req.path,
+        status: res.statusCode,
+      });
+      logKeyUse({
+        keyId,
+        accountId,
+        path:   req.path,
+        method: req.method,
+        status: res.statusCode,
+        ip:     getRequestIp(req),
+      });
+    });
+
     return next();
   }
+
   if (found.status === 'revoked') {
     return res.status(401).json({ success: false, error: 'API key has been revoked', code: 'KEY_REVOKED' });
   }

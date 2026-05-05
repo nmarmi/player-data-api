@@ -326,6 +326,22 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /admin/keys/{keyId}/usage:
+    get:
+      summary: Recent usage rows for an API key (US-10.4)
+      parameters:
+        - in: path
+          name: keyId
+          required: true
+          schema: { type: integer }
+        - in: query
+          name: days
+          schema: { type: integer, default: 30, maximum: 30 }
+      responses:
+        '200': { description: Usage log rows }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
 components:
   securitySchemes:
     ApiKey:

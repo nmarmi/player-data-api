@@ -756,7 +756,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 
 **Implementation:** `developerAccounts.js` gains `listKeys(accountId)` and `revokeKeyById(keyId, accountId)`. `findKeyByRaw` now returns `{ status: 'valid'|'revoked'|'not_found' }` so `requireLicense` can emit `KEY_REVOKED` vs `UNAUTHORIZED`. Controller functions `issueKey`, `getKeys`, `deleteKey` added; routes mounted under `/api/v1/developer/keys`. UI from US-10.2 already had the copy-to-clipboard raw key banner. `tests/developer.test.js` extended with 10 new key management tests (create → list → use → revoke → revoked-401 flow). 117/117 tests pass.
 
-### US-10.4: Audit trail tying every key use back to its account
+### US-10.4: Audit trail tying every key use back to its account ✅ COMPLETED
 **As a** Player Data API operator, **I want** every authenticated request logged with the issuing account + key, **so that** when a key is abused I can trace the blast radius.
 
 **Acceptance criteria:**
@@ -765,6 +765,8 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 - Admin endpoint `GET /api/v1/admin/keys/:keyId/usage` returns the recent usage rows
 - Logger entries (US-8.2) include `accountId` and `keyId` (last 4 chars only) for cross-referencing
 - `tests/api.integration.test.js` asserts `last_used_at` is bumped after a successful authed call
+
+**Implementation:** `src/db/migrate.js` adds `api_key_usage_log` table. `src/db/auditLog.js` provides `logKeyUse` (writes row + prunes rows > 30 days) and `getKeyUsage`. `requireLicense` schedules a `res.on('finish', ...)` hook after DB-key auth — emits structured log with `accountId`/`keyId` (row id, not raw key) and writes to `api_key_usage_log`. Admin route `GET /api/v1/admin/keys/:keyId/usage` added; OpenAPI spec updated. `api.integration.test.js` gains `last_used_at` bump assertion. 118/118 tests pass.
 
 ### US-10.5: IP address whitelisting per key
 **As a** developer, **I want** to scope each key to one or more IP addresses or CIDR blocks, **so that** a leaked key from a server with a fixed IP can't be used elsewhere.

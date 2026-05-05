@@ -14,6 +14,7 @@
  * Protected by requireAdmin middleware (see routes/admin.js).
  */
 
+const { getKeyUsage } = require('../db/auditLog');
 const { ingestPlayerMetadata } = require('../jobs/ingestPlayerMetadata');
 const { ingestInjuries }       = require('../jobs/ingestInjuries');
 const { ingestDepthCharts }    = require('../jobs/ingestDepthCharts');
@@ -124,4 +125,15 @@ async function triggerRefresh(req, res) {
   });
 }
 
-module.exports = { triggerRefresh };
+/** GET /admin/keys/:keyId/usage — recent usage rows for a key (US-10.4) */
+function getKeyUsageLog(req, res) {
+  const keyId = Number(req.params.keyId);
+  if (!keyId) {
+    return res.status(400).json({ success: false, error: 'Invalid keyId', code: 'INVALID_INPUT' });
+  }
+  const days = Math.min(Number(req.query.days) || 30, 30);
+  const rows = getKeyUsage(keyId, days);
+  return res.json({ success: true, keyId, days, rows });
+}
+
+module.exports = { triggerRefresh, getKeyUsageLog };

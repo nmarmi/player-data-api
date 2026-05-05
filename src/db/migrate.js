@@ -140,6 +140,20 @@ function migrate() {
     )
   `);
 
+  // US-10.4: API key usage audit log (rolling 30-day TTL enforced on write)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS api_key_usage_log (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      key_id     INTEGER NOT NULL,
+      account_id INTEGER NOT NULL,
+      path       TEXT    NOT NULL,
+      method     TEXT    NOT NULL,
+      status     INTEGER NOT NULL DEFAULT 0,
+      ip         TEXT,
+      at         TEXT    NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   createSyncLogTable();
   log.info('migration complete', { tablesReady: 'all' });
 }

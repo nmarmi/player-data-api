@@ -4,6 +4,14 @@ process.env.API_LICENSE_KEY = process.env.API_LICENSE_KEY || 'test-license-key';
 
 const request = require('supertest');
 const app = require('../src/app');
+const { migrate } = require('../src/db/migrate');
+const { createAccount, createKey } = require('../src/db/developerAccounts');
+const { getDb } = require('../src/db/connection');
+
+beforeAll(() => {
+  // Ensure all tables (including api_keys) exist in the test DB.
+  try { migrate(); } catch (_) {}
+});
 
 function buildDraftKitLeagueSettings() {
   return {
@@ -428,6 +436,26 @@ describe('US-7.4 integration tests for API endpoints', () => {
     const highAvg = overlap.reduce((s, id) => s + highById.get(id), 0) / overlap.length;
     const lowAvg = overlap.reduce((s, id) => s + lowById.get(id), 0) / overlap.length;
     expect(lowAvg).toBeLessThan(highAvg);
+  });
+
+  test('US-10.4: last_used_at is bumped after a successful DB-key authed call', async () => {
+    // Create a fresh account + key in the test DB
+    const accountId = createAccount(`audit-${Date.now()}@example.com`, 'password123', false);
+    const { rawKey, id: keyId } = createKey(accountId, 'audit-test');
+
+    // Confirm last_used_at starts null
+    const before = getDb().prepare('SELECT last_used_at FROM api_keys WHERE id = ?').get(keyId);
+    expect(before.last_used_at).toBeNull();
+
+    // Make an authenticated request with the DB-issued key
+    const res = await request(app)
+      .get('/api/v1/players?limit=1')
+      .set('X-API-Key', rawKey);
+    expect(res.status).toBe(200);
+
+    // last_used_at should now be set
+    const after = getDb().prepare('SELECT last_used_at FROM api_keys WHERE id = ?').get(keyId);
+    expect(after.last_used_at).toBeTruthy();
   });
 
   test('debug exclusions: valuations can explain why a player is excluded', async () => {
