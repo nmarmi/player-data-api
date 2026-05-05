@@ -732,7 +732,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 
 **Implementation:** `src/db/migrate.js` adds `developer_accounts` + `api_keys` tables. `src/db/developerAccounts.js` provides `createAccount`, `createKey`, `findKeyByRaw`, `touchKey`, `hashPassword`, `verifyPassword`. `src/db/seedAdmin.js` seeds a bootstrap admin on first start (configurable via `ADMIN_EMAIL`/`ADMIN_PASSWORD` env; logs the raw key once). `src/middleware/license.js` updated — DB key lookup first (SHA-256 hash match, attaches `req.developerAccount`), legacy env fallback second. 95/95 tests pass.
 
-### US-10.2: Front-end UI for developer account create/login
+### US-10.2: Front-end UI for developer account create/login ✅ COMPLETED
 **As a** developer wanting access, **I want** a hosted page (`/developer-portal`) where I can create an account and sign in, **so that** the API doesn't depend on an out-of-band onboarding email.
 
 **Acceptance criteria:**
@@ -741,6 +741,8 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 - Static UI served at `/developer-portal/*` — register, login, profile, "My Keys" pages
 - Password validation: minimum length, distinct hashing rounds documented in code
 - Integration tests: register → login → profile → logout
+
+**Implementation:** Stateless signed-cookie session via `src/middleware/session.js` (HMAC-SHA256, no external dep). `src/controllers/developerController.js` + `src/routes/developer.js` implement register/login/me/logout. Password min-length 8 enforced; scrypt hashing (64-byte, salted). Static UI at `public/developer-portal/index.html` (register, sign-in, and "My Keys" dashboard tabs). `tests/developer.test.js` covers all 12 register → login → /me → logout scenarios. 107/107 tests pass.
 
 ### US-10.3: Front-end UI for API key generation
 **As a** signed-in developer, **I want** a "Create new key" button on my dashboard that returns the raw key once (and never again), **so that** I have a self-service path to spin up a new credential.

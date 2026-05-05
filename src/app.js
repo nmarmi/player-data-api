@@ -5,11 +5,12 @@ const log = require('./logger').child({ component: 'app' });
 const pkg = require('../package.json');
 
 //actual endpoints and handles routing
-const healthRouter    = require('./routes/health');
-const licenseRouter   = require('./routes/license');
-const playersRouter   = require('./routes/players');
-const analyticsRouter = require('./routes/analytics');
-const adminRouter     = require('./routes/admin');
+const healthRouter     = require('./routes/health');
+const licenseRouter    = require('./routes/license');
+const playersRouter    = require('./routes/players');
+const analyticsRouter  = require('./routes/analytics');
+const developerRouter  = require('./routes/developer');
+const adminRouter      = require('./routes/admin');
 
 const app = express();
 //controls who can call your api. The * is anyone good for testing, otherwise restricts frontend domains
@@ -23,6 +24,14 @@ const LEGACY_SUNSET = process.env.LEGACY_API_SUNSET || 'Wed, 31 Dec 2026 23:59:5
 app.use(cors({ origin: ALLOWED_ORIGIN }));
 //lets API read json request bodies
 app.use(express.json());
+
+// US-10.2: session cookie middleware — populates req.session on every request
+const { sessionMiddleware } = require('./middleware/session');
+app.use(sessionMiddleware);
+
+// US-10.2: developer portal static UI
+const path = require('path');
+app.use('/developer-portal', express.static(path.join(__dirname, '../public/developer-portal')));
 
 // US-2.8: mark legacy unversioned endpoints as deprecated.
 // Adds Deprecation, Sunset, and Link headers so callers can migrate to /api/v1/*.
@@ -72,6 +81,7 @@ app.use(rateLimitByKey);
 app.use(`/api/${API_VERSION}/license`, licenseRouter);
 app.use(`/api/${API_VERSION}/players`, playersRouter);
 app.use(`/api/${API_VERSION}/analytics`, analyticsRouter);
+app.use(`/api/${API_VERSION}/developer`, developerRouter);
 app.use(`/api/${API_VERSION}/admin`, adminRouter);
 
 // Legacy unversioned routes (aliases — kept for backwards compatibility)
