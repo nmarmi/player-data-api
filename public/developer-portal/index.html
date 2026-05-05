@@ -37,7 +37,7 @@
     .key-meta { color: #64748b; font-size: 0.8rem; margin-top: 0.2rem; }
     .raw-key-banner { margin-top: 1rem; background: #1a2e1a; border: 1px solid #166534; border-radius: 8px; padding: 1rem; }
     .raw-key-banner code { word-break: break-all; font-size: 0.85rem; color: #86efac; display: block; margin: 0.5rem 0 1rem; }
-    #page-auth, #page-dashboard { display: none; }
+    #page-dashboard { display: none; }
   </style>
 </head>
 <body>
@@ -207,9 +207,13 @@
 
     // On load — check if already signed in
     (async () => {
-      const { status, data } = await api('GET', '/me');
-      if (status === 200) showDashboard(data.account);
-      else showAuth();
+      try {
+        const { status, data } = await api('GET', '/me');
+        if (status === 200) showDashboard(data.account);
+        else showAuth();
+      } catch (_) {
+        showAuth();
+      }
     })();
   </script>
 </body>
