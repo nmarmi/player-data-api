@@ -10,6 +10,49 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 
 ---
 
+## Rubric Coverage
+
+This section maps every line in the project rubric (`416-S26-Final Project-System Testing - Project Requirements.csv`) to the Player Data API story (existing or new) that satisfies it. Rubric items handled on the Draft Kit side are marked **(Kit)**.
+
+### Player API Licensing (10 pts)
+| Rubric line | Pts | Story |
+|---|---:|---|
+| Front-End UI for Developer to Create/Manage Account | 2 | US-10.2 |
+| Front-End UI for Key Generation | 2 | US-10.3 |
+| Account Tied to Key Generation & Use | 2 | US-10.1, US-10.4 |
+| IP Address Whitelisting | 2 | US-10.5 |
+| Request Throttling | 2 | US-8.5 |
+| License Used Properly by Draft Kit Server | 4 | **(Kit)** US-11.4, US-11.5, US-11.8 |
+
+> Note: the rubric category sums to 12pt of underlying lines for a 10pt cap — graders can pick the strongest 5 of 6.
+
+### Player API Valuations (10 pts)
+| Rubric line | Pts | Story |
+|---|---:|---|
+| Test Cases 1-5 Variation Values Quality | 5 | US-7.3 (`tests/valuationEngine.test.js`) |
+| Custom 1 or 3 year stats used | 1 | US-11.1 |
+| Predictive stats used | 1 | US-11.2 |
+| Age Used | 1 | US-11.3 |
+| Injury Status Used | 1 | US-11.4 |
+| Scarcity Used | 1 | US-5.2 |
+| Depth Chart Position Used | 1 | US-11.5 |
+| New Values requested/presented after every edit | 2 | **(Kit)** US-13.1 |
+
+### Player API → Draft Kit Push Notification (10 pts)
+| Rubric line | Pts | Story |
+|---|---:|---|
+| Mechanism to Force New Notification-worthy info via Player API | 5 | US-13.1, US-13.2, US-13.3 |
+| Draft Kit show updated pushed state | 2 | **(Kit)** US-25.1 |
+| Draft Kit employs notification system to alert user | 2 | **(Kit)** US-25.2 |
+| Player Details — Depth Chart | 1 | US-4.3 (data) + **(Kit)** US-21.1 (display) |
+| Player Details — Transactions/Contract | 1 | US-4.4 (data) + **(Kit)** US-21.1 (display) |
+| Player Details — Injury/News | 1 | US-4.2 (data) + **(Kit)** US-21.1 (display) |
+
+### Other rubric categories
+All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day**, **Taxi Draft**, **User Interface** — have no Player Data API surface and are mapped in `416-Minimum-Viable-Product/docs/DRAFT_KIT_USER_STORIES.md#rubric-coverage`.
+
+---
+
 ## Execution Order
 
 ### Phase 1: Data Model & ID Standardization (do first, unblocks Draft Kit)
@@ -662,6 +705,157 @@ The Draft Kit repo owns the live auction state (purchases, budgets, rosters, his
 
 ---
 
+## Epic 10: Developer Account & API Key Management UI (Rubric: Player API Licensing)
+
+> **Rubric mapping:** "Front-End UI for Developer to Create/Manage Account" (2pt), "Front-End UI for Key Generation" (2pt), "Account Tied to Key Generation & Use" (2pt), "IP Address Whitelisting" (2pt) — 8pt total. (Throttling is already done by US-8.5; "License used properly by Draft Kit Server" is satisfied by Draft Kit US-11.4/11.5/11.8.)
+
+> The current `requireLicense` middleware accepts a flat `API_LICENSE_KEY` / `VALID_API_KEYS` env var. This epic moves issuance and revocation behind a real account model with a developer-facing UI, so the rubric's "complete mediation" line item is satisfied.
+
+### US-10.1: Developer account model + auth
+**As a** Player Data API operator, **I want** a `DeveloperAccount` table with email, hashed password, and a relation to issued API keys, **so that** every key in circulation is traceable to a known account.
+
+**Acceptance criteria:**
+- New `developer_accounts` table — `id`, `email` (unique), `password_hash`, `is_admin`, `created_at`
+- New `api_keys` table — `id`, `account_id` (FK), `key_hash` (we never store the raw key), `label`, `ip_whitelist` (JSON array of CIDR or `*`), `revoked_at`, `last_used_at`, `created_at`
+- Migration script + seed for a single bootstrap admin developer (configurable via env)
+- Existing `requireLicense` keeps working: hashed-key lookup against `api_keys` where `revoked_at IS NULL` and `now()` < expiry, attaches `req.developerAccount` for downstream audit
+- Backwards compatible: legacy `API_LICENSE_KEY` env still works as a "system key" until removed in a follow-up
+
+### US-10.2: Front-end UI for developer account create/login
+**As a** developer wanting access, **I want** a hosted page (`/developer-portal`) where I can create an account and sign in, **so that** the API doesn't depend on an out-of-band onboarding email.
+
+**Acceptance criteria:**
+- New routes: `POST /api/v1/developer/register`, `POST /api/v1/developer/login`, `GET /api/v1/developer/me`, `POST /api/v1/developer/logout`
+- Cookie-based session (separate from the `X-API-Key` data plane)
+- Static UI served at `/developer-portal/*` — register, login, profile, "My Keys" pages
+- Password validation: minimum length, distinct hashing rounds documented in code
+- Integration tests: register → login → profile → logout
+
+### US-10.3: Front-end UI for API key generation
+**As a** signed-in developer, **I want** a "Create new key" button on my dashboard that returns the raw key once (and never again), **so that** I have a self-service path to spin up a new credential.
+
+**Acceptance criteria:**
+- New endpoint `POST /api/v1/developer/keys` accepts `{ label, ipWhitelist? }` and returns `{ key: <raw value>, id, label }` exactly once
+- The raw key is never persisted; only a hash is stored
+- UI surfaces the raw key in a copy-to-clipboard banner with a "I've saved this — won't be shown again" confirm gate
+- Listing endpoint `GET /api/v1/developer/keys` returns `{ id, label, ipWhitelist, lastUsedAt, createdAt }` (no key value)
+- Revocation endpoint `DELETE /api/v1/developer/keys/:id` sets `revoked_at = now()`; subsequent requests with that key fail `401 KEY_REVOKED`
+
+### US-10.4: Audit trail tying every key use back to its account
+**As a** Player Data API operator, **I want** every authenticated request logged with the issuing account + key, **so that** when a key is abused I can trace the blast radius.
+
+**Acceptance criteria:**
+- `requireLicense` updates `api_keys.last_used_at` on success
+- New `api_key_usage_log` table (rolling 30-day TTL) — `id`, `key_id`, `account_id`, `path`, `method`, `status`, `ip`, `at`
+- Admin endpoint `GET /api/v1/admin/keys/:keyId/usage` returns the recent usage rows
+- Logger entries (US-8.2) include `accountId` and `keyId` (last 4 chars only) for cross-referencing
+- `tests/api.integration.test.js` asserts `last_used_at` is bumped after a successful authed call
+
+### US-10.5: IP address whitelisting per key
+**As a** developer, **I want** to scope each key to one or more IP addresses or CIDR blocks, **so that** a leaked key from a server with a fixed IP can't be used elsewhere.
+
+**Acceptance criteria:**
+- `api_keys.ip_whitelist` accepts `null` (no restriction), `["1.2.3.4"]`, or `["10.0.0.0/24", "203.0.113.5"]`
+- `requireLicense` resolves the request IP via `X-Forwarded-For` (when `TRUST_PROXY=true`) or `req.socket.remoteAddress`; rejects with `401 IP_NOT_ALLOWED` when whitelist is non-empty and no entry matches
+- UI: the key list shows the whitelist; "Edit" opens a dialog to update it
+- README documents the trust-proxy expectation for hosted deploys (Render, Vercel rewrites, etc.)
+- Integration tests cover (a) no whitelist → all IPs pass, (b) whitelist mismatch → `401 IP_NOT_ALLOWED`, (c) CIDR match → pass
+
+---
+
+## Epic 11: Valuation Engine — Predictive & Contextual Inputs (Rubric: Player API Valuations)
+
+> **Rubric mapping:** "Custom 1 or 3 year stats used" (1pt), "Predictive stats used" (1pt), "Age Used" (1pt), "Injury Status Used" (1pt), "Depth Chart Position Used" (1pt) — 5pt total. ("Scarcity Used" is US-5.2; "Test Cases 1-5 Variation" is `tests/valuationEngine.test.js`; "New Values requested/presented after every edit" is satisfied by Draft Kit US-13.1.)
+
+### US-11.1: Multi-year stats option (1-year vs 3-year averaging)
+**As a** Draft Kit user setting up valuations, **I want** to choose between last-season-only stats or a 3-year weighted average, **so that** valuations match my league's preference for recency vs. stability.
+
+**Acceptance criteria:**
+- `leagueSettings.statsWindow` field — enum: `'last1' | 'last3'` (default `'last1'`)
+- When `last3`: `loadStatRows` queries the 3 most recent completed seasons and computes a weighted average (`50% / 30% / 20%` for years 1/2/3); rate stats (AVG/OBP/SLG/ERA/WHIP) weighted by AB or IP rather than year
+- `valuationEngine.normalizeLeagueSettings` accepts the field and threads it through; backwards compatible (default behavior unchanged when unset)
+- Unit test: same player produces materially different `projectedValue` when toggling `last1` ↔ `last3` for someone with a hot/cold prior year
+
+### US-11.2: Predictive (projected) stats input
+**As a** Draft Kit user, **I want** the engine to use forward-looking projected stats (Steamer / ZiPS / community) when available, instead of last year's raw stats, **so that** valuations reflect an expectation, not a memory.
+
+**Acceptance criteria:**
+- New `player_projections` table — `(player_id, season, source)` PK + the same column set as `player_stats`
+- New CLI script `scripts/import-projections.js` accepts a CSV path and a `--source` flag; expected sources: `steamer`, `zips`, `manual`
+- `valuationEngine` prefers `player_projections` rows for the upcoming season when present; falls back to `player_stats` when no projection exists
+- New env var `VALUATION_PROJECTION_SOURCE` (default `steamer`) selects the active source
+- Response `meta` reports `usedProjectionSource` so the Draft Kit can show "Powered by Steamer projections"
+
+### US-11.3: Age factor in valuation
+**As a** Draft Kit user in a dynasty league, **I want** age folded into valuations (a 30-year-old's $40 is worth less than a 22-year-old's $40 over a 3-year contract), **so that** my long-term roster strategy is reflected in the auction price.
+
+**Acceptance criteria:**
+- `players.birth_date` ingested via the MLB Stats API roster hydration (already available in the `person` payload — extend US-4.1 ingestion)
+- `valuationEngine` computes `ageAtSeasonStart` and applies a multiplier curve: `1.0` for ages 24–28, fading to `0.85` by age 35 and `1.05` for age ≤ 22
+- Multiplier shape configurable via `VALUATION_AGE_CURVE` env var (JSON map) for league-by-league tuning
+- Disabled by default in single-year leagues (controlled by `leagueSettings.ageFactor: boolean`, default `false`)
+- Test: identical projections with ages 24 vs 36 produce differing `projectedValue` when `ageFactor: true`
+
+### US-11.4: Injury status in valuation
+**As a** Draft Kit user, **I want** the `IL-60` / `IL-10` / `DTD` flags ingested by Epic 4 to discount valuations proportionally, **so that** a season-ending IL stay isn't priced as if the player is healthy.
+
+**Acceptance criteria:**
+- Discount table: `IL-10 → 0.95`, `IL-15 → 0.93`, `IL-60 → 0.6`, `DTD → 0.97`, `minors → 0.0`, `DFA → 0.0` (configurable via env)
+- `valuationEngine` multiplies `projectedValue` by the discount when the player's current `status` is non-active
+- Response includes `injuryAdjustment: { status, multiplier }` per player so the Draft Kit can render "−40% (IL-60)" tooltips
+- Test: identical projections — one `active`, one `IL-60` — produce values in the documented ratio
+
+### US-11.5: Depth chart position factor in valuation
+**As a** Draft Kit user, **I want** depth-chart rank (already ingested by US-4.3) factored into valuation, **so that** a 4th-string SP isn't valued at the same level as a #1 SP with the same career ERA sample.
+
+**Acceptance criteria:**
+- Multiplier per `depthChartRank`: `1 → 1.0`, `2 → 0.9`, `3 → 0.7`, `4+ → 0.4`, `null → 0.5` (uncharted = unknown)
+- Engine output includes `depthChartAdjustment: { rank, multiplier }` per player
+- Configurable via env `VALUATION_DEPTH_CURVE`; opt-out via `leagueSettings.depthChartFactor: boolean` (default `true`)
+- Test: same player evaluated with rank 1 vs rank 4 produces values in the documented ratio
+
+---
+
+## Epic 12: ~~RESERVED~~
+
+> Epic 12 is intentionally skipped to leave room for `legacy/cleanup` work that may surface during the rubric pass. Keep numbering aligned with the cross-repo references in Epic 11 (Draft Kit) and downstream docs.
+
+---
+
+## Epic 13: Push Notifications from Player Data API (Rubric: Push Notification)
+
+> **Rubric mapping:** "Mechanism to Force New Notification-worthy info via Player API" (5pt) — the Player Data API's half of the 10pt push category. (The Draft Kit's half — show pushed state + notification UI — is its Epic 25.)
+
+### US-13.1: Notification-worthy event detection
+**As a** Player Data API maintainer, **I want** the ingestion jobs to flag every "newsworthy" change (status flip, depth-chart move, transaction) onto an event stream, **so that** subscribed Draft Kits can react.
+
+**Acceptance criteria:**
+- New `events` table — `id`, `type` (`player.injury` | `player.transaction` | `player.depthChart`), `playerId`, `payload` (JSON), `createdAt`, `dispatchedAt`
+- `ingestInjuries`, `ingestDepthCharts`, `ingestTransactions` insert an `events` row for every diff vs prior state (no rows on no-op runs)
+- Per-event payload includes the new value, prior value, and `dataAsOf`
+- Backfill safeguard: events older than 24h on first deploy are NOT replayed (avoid notification storm)
+
+### US-13.2: Push delivery channel (Server-Sent Events + webhook)
+**As a** Draft Kit, **I want** to subscribe to a stream of events scoped to my session's available player pool, **so that** my UI updates without polling.
+
+**Acceptance criteria:**
+- New endpoint `GET /api/v1/events/stream?playerIds=mlb-1,mlb-2,…` — Server-Sent Events; auth via `X-API-Key`
+- Each `events` row matching the requested `playerIds` is dispatched as `event: <type>\ndata: <json>` to subscribers; `dispatchedAt` set when sent
+- Heartbeat ping every 25 seconds keeps proxies from killing the connection
+- Optional webhook mode: developer accounts (Epic 10) can register a `webhookUrl`; events POST to it with HMAC signature
+- Reconnection support: client passes `?since=<lastEventId>` to resume
+
+### US-13.3: Force-trigger admin endpoint (manual notification injection)
+**As a** Player Data API operator demoing the system, **I want** to inject a synthetic notification on demand, **so that** the rubric demo doesn't depend on the MLB Stats API actually publishing news during the grading window.
+
+**Acceptance criteria:**
+- New endpoint `POST /api/v1/admin/events` accepts `{ type, playerId, payload }` and writes an `events` row
+- Admin auth (US-8.5 / `requireAdmin`) gates the endpoint
+- Synthetic events flow through the same delivery channel as real ones — Draft Kits can't tell the difference
+- README documents the demo recipe: "to demonstrate the push system, POST `{ type: 'player.injury', playerId: 'mlb-660271', payload: { status: 'IL-60', reason: 'Demo' } }`"
+
+---
+
 ## Data Refresh Policy Reference
 
 | Data Type | Refresh Frequency | MLB Stats API Source | Examples |
@@ -719,4 +913,8 @@ These are the shapes both repos must agree on. They are defined by US-5.3, US-5.
 | Integration cleanup | 2.8, 2.9, 8.5 | 3 |
 | Then | 4.1–4.8, 8.2, 8.4 | 4 |
 | Later | 5.1–5.5, 6.1–6.4, 7.3, 7.5, 8.3 | 5 |
-| **Total** | **48 stories** | |
+| **Rubric parity (added from project rubric)** | | |
+| Developer Account & API Key UI (Licensing) | 10.1–10.5 | 6 |
+| Valuation predictive & contextual inputs (Valuations) | 11.1–11.5 | 6 |
+| Push notifications channel | 13.1–13.3 | 6 |
+| **Total** | **61 stories** | |
