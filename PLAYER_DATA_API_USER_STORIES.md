@@ -702,13 +702,15 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 - `GET /api/v1/analytics/sync-status` — data freshness status (moved from `/usage/sync-status`)
 Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pass.
 
-### US-9.3: Update README for new product vision
+### US-9.3: Update README for new product vision ✅ COMPLETED
 **Acceptance criteria:**
 - README states: this is the Player Data API for a fantasy baseball auction draft assistant
 - Documents the relationship to the Draft Kit repo
 - Lists current endpoints with updated schemas
 - Describes the data ingestion and refresh strategy
 - Removes references to features that don't exist
+
+**Implementation:** Full README rewrite — product intro names DraftIQ and the Draft Kit relationship; endpoint table standardized to `/api/v1/` canonical paths; analytics endpoints added; ingestion strategy section added with scheduler staleness thresholds; stale "cookie-based auth (planned)" removed; `ADMIN_KEY` corrected to `ADMIN_API_KEY`; project structure updated with `analytics` route and `rateLimit.js` middleware; "Connecting" section updated to reference `/api/v1/analytics/usage`.
 
 ---
 
