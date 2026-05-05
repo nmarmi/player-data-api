@@ -262,9 +262,9 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
-  /usage:
+  /analytics/usage:
     post:
-      summary: Record a client-side usage event
+      summary: Log and persist a usage event (US-9.2)
       requestBody:
         required: true
         content:
@@ -279,9 +279,9 @@ paths:
         '200': { description: Recorded }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
-  /usage/sync-status:
+  /analytics/sync-status:
     get:
-      summary: Returns last-sync metadata for every ingestion source
+      summary: Returns last-sync metadata for every ingestion source (US-9.2)
       responses:
         '200': { description: OK }
         '503': { description: Sync log unavailable }

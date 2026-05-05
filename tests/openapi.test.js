@@ -59,7 +59,7 @@ function exampleBodyFor(openapiPath, method) {
       teamId: 'fantasy-team-1',
     };
   }
-  if (openapiPath === '/usage' && method === 'post') {
+  if (openapiPath === '/analytics/usage' && method === 'post') {
     return { event: 'spec-smoke', timestamp: new Date().toISOString() };
   }
   if (openapiPath === '/admin/refresh') {

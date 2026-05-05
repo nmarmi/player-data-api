@@ -18,11 +18,11 @@ All endpoints except `/health` require `X-API-Key: <key>` or `Authorization: Bea
 | POST | `/players/recommendations` | Top available players by projected value |
 | POST | `/players/recommendations/nominations` | Nomination targets to drain opponents' budgets |
 | POST | `/players/recommendations/budget` | Per-position spend allocations |
-| GET | `/usage/sync-status` | Data freshness status |
-| POST | `/usage` | Log a usage event |
+| GET | `/api/v1/analytics/sync-status` | Data freshness for all ingestion sources |
+| POST | `/api/v1/analytics/usage` | Log and persist a usage event |
 | POST | `/admin/refresh` | Manually trigger data ingestion (admin key required) |
 
-All paths above are also available under the `/api/v1/` prefix (canonical form). The unversioned aliases are kept for backward compatibility.
+All player/license/admin paths are also available without the `/api/v1/` prefix (unversioned aliases kept for backward compatibility). Analytics endpoints are v1-only.
 
 ### GET /players — query params
 

@@ -5,11 +5,11 @@ const log = require('./logger').child({ component: 'app' });
 const pkg = require('../package.json');
 
 //actual endpoints and handles routing
-const healthRouter  = require('./routes/health');
-const licenseRouter = require('./routes/license');
-const playersRouter = require('./routes/players');
-const usageRouter   = require('./routes/usage');
-const adminRouter   = require('./routes/admin');
+const healthRouter    = require('./routes/health');
+const licenseRouter   = require('./routes/license');
+const playersRouter   = require('./routes/players');
+const analyticsRouter = require('./routes/analytics');
+const adminRouter     = require('./routes/admin');
 
 const app = express();
 //controls who can call your api. The * is anyone good for testing, otherwise restricts frontend domains
@@ -71,13 +71,12 @@ app.use(rateLimitByKey);
 // v1 versioned routes
 app.use(`/api/${API_VERSION}/license`, licenseRouter);
 app.use(`/api/${API_VERSION}/players`, playersRouter);
-app.use(`/api/${API_VERSION}/usage`, usageRouter);
+app.use(`/api/${API_VERSION}/analytics`, analyticsRouter);
 app.use(`/api/${API_VERSION}/admin`, adminRouter);
 
 // Legacy unversioned routes (aliases — kept for backwards compatibility)
 app.use('/license', licenseRouter);
 app.use('/players', playersRouter);
-app.use('/usage', usageRouter);
 app.use('/admin', adminRouter);
 
 // US-9.1: Production API serves only JSON. The demo UI lives in
@@ -98,6 +97,8 @@ app.get('/', (_req, res) => {
       valuations:      `/api/${API_VERSION}/players/valuations`,
       recommendations: `/api/${API_VERSION}/players/recommendations`,
       license:         `/api/${API_VERSION}/license/check`,
+      analytics:       `/api/${API_VERSION}/analytics/usage`,
+      syncStatus:      `/api/${API_VERSION}/analytics/sync-status`,
       admin:           `/api/${API_VERSION}/admin/refresh`,
     },
   });

@@ -692,10 +692,15 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (`public/` removed entirely; `index.html`, `app.jsx`, `styles.css`, `favicon.ico` relocated to `examples/demo-ui/` via `git mv` so history is preserved. Added `examples/demo-ui/README.md` documenting the move + how to run the demo locally. `src/app.js` no longer imports `path`, dropped `app.use(express.static(...))`, and the root route now returns API info JSON: `{ success, service, name, version, apiVersion, docs, health, endpoints: { players, pool, valuations, recommendations, license, admin } }`. `vercel.json` updated to point `outputDirectory` at `examples/demo-ui` so the hosted demo at `player-data-api.vercel.app` keeps working. README's "Demo UI", "Deployment", and "Project structure" sections updated to reference the new path. **Verified live**: `GET /` returns the JSON shape; `GET /index.html` returns `404 NOT_FOUND` (no static fallback); `GET /api/v1/health` unchanged. **95/95 tests still passing.**)
 
-### US-9.2: Remove usage tracking endpoint (or scope it)
+### US-9.2: Remove usage tracking endpoint (or scope it) ✅ COMPLETED
 **Acceptance criteria:**
 - If kept: endpoint renamed to `/api/v1/analytics/usage` and events persisted
 - If removed: route and controller deleted, README updated
+
+**Implementation:** Kept and scoped. Created `src/routes/analytics.js` mounting:
+- `POST /api/v1/analytics/usage` — persists events to `usage_events` table (graceful fallback if table not yet migrated)
+- `GET /api/v1/analytics/sync-status` — data freshness status (moved from `/usage/sync-status`)
+Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pass.
 
 ### US-9.3: Update README for new product vision
 **Acceptance criteria:**

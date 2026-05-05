@@ -104,6 +104,17 @@ function migrate() {
     )
   `);
 
+  // US-9.2: persisted analytics events
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS usage_events (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      event       TEXT    NOT NULL,
+      api_key     TEXT,
+      metadata    TEXT    NOT NULL DEFAULT '{}',
+      recorded_at TEXT    NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   createSyncLogTable();
   log.info('migration complete', { tablesReady: 'all' });
 }
