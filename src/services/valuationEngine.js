@@ -66,6 +66,30 @@ const DEFAULTS = {
     pitchingK: { w: 90, k: 70, sv: 70, era: 120, whip: 120 },
     rookieVolumeFallbackPct: 0.6,
   },
+  // Availability/role adjustment settings (US rubric: injury + depth chart used).
+  availability: {
+    injuryMultipliers: {
+      active: 1.0,
+      dtd: 0.95,
+      day_to_day: 0.95,
+      probable: 0.97,
+      questionable: 0.9,
+      il_7: 0.9,
+      il_10: 0.85,
+      il_15: 0.8,
+      il_60: 0.55,
+      out: 0.6,
+      suspended: 0.75,
+      bereavement: 0.85,
+      restricted: 0.75,
+    },
+    depthRankMultipliers: {
+      '1': 1.0,
+      '2': 0.75,
+      '3': 0.55,
+      defaultBench: 0.4,
+    },
+  },
 };
 
 const HITTER_POSITION_KEYS = new Set(['C', '1B', '2B', '3B', 'SS', 'OF', 'UTIL', 'DH']);
@@ -119,6 +143,51 @@ function safeDiv(n, d) {
   return (Number(n) || 0) / denom;
 }
 
+function normalizeStatusKey(status) {
+  return String(status || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_');
+}
+
+function injuryMultiplierForStatus(status, settings) {
+  const map = settings?.availability?.injuryMultipliers || DEFAULTS.availability.injuryMultipliers;
+  const normalized = normalizeStatusKey(status);
+  if (!normalized || normalized === 'active') return 1.0;
+  if (Object.prototype.hasOwnProperty.call(map, normalized)) return Number(map[normalized]) || 1.0;
+  // Handle common IL statuses like "il-10", "il10", "10-day il".
+  if (normalized.includes('il_60') || normalized.includes('60_day_il')) return Number(map.il_60) || 0.55;
+  if (normalized.includes('il_15') || normalized.includes('15_day_il')) return Number(map.il_15) || 0.8;
+  if (normalized.includes('il_10') || normalized.includes('10_day_il')) return Number(map.il_10) || 0.85;
+  if (normalized.includes('il_7') || normalized.includes('7_day_il')) return Number(map.il_7) || 0.9;
+  if (normalized.includes('dtd') || normalized.includes('day_to_day')) return Number(map.dtd) || 0.95;
+  if (normalized.includes('out')) return Number(map.out) || 0.6;
+  return 1.0;
+}
+
+function depthChartMultiplier(row, statGroup, settings) {
+  const cfg = settings?.availability?.depthRankMultipliers || DEFAULTS.availability.depthRankMultipliers;
+  const rank = Number(row.depth_chart_rank || row.depthChartRank || 0);
+  const role = String(row.depth_chart_position || row.depthChartPosition || '').toUpperCase();
+
+  if (rank === 1) {
+    // Slight role-aware boosts for high leverage/locked roles.
+    if (statGroup === 'pitching' && (role.includes('CL') || role.includes('RP'))) return 1.03;
+    if (statGroup === 'hitting' && (role.includes('DH') || role.includes('UTIL'))) return 1.01;
+    return Number(cfg['1']) || 1.0;
+  }
+  if (rank === 2) return Number(cfg['2']) || 0.75;
+  if (rank >= 3) return Number(cfg['3']) || 0.55;
+  return Number(cfg.defaultBench) || 0.4;
+}
+
+function availabilityMultiplier(row, statGroup, settings) {
+  const injury = injuryMultiplierForStatus(row.status, settings);
+  const depth = depthChartMultiplier(row, statGroup, settings);
+  // Keep adjustment bounded so it is meaningful but not dominant.
+  return Math.max(0.25, Math.min(1.1, injury * depth));
+}
+
 // ── DB loader ─────────────────────────────────────────────────────────────────
 
 /**
@@ -137,6 +206,7 @@ function loadStatRows(season, group) {
       const rows = db.prepare(`
         SELECT
           p.player_id, p.name, p.positions, p.mlb_team, p.status, p.is_available,
+          p.depth_chart_rank, p.depth_chart_position,
           ps.games_played, ps.ab, ps.r,  ps.h,  ps.hr, ps.rbi, ps.bb,
           ps.k,  ps.sb, ps.avg, ps.obp, ps.slg, ps.ops,
           ps.w,  ps.l,  ps.era, ps.whip, ps.k9, ps.ip, ps.sv, ps.hld
@@ -253,6 +323,7 @@ function projectRowsWithReliability(rows, statGroup, settings) {
   return rows.map((row) => {
     const sample = Math.max(0, Number(row[volumeField]) || 0);
     const expectedVolume = sample > 0 ? sample : fallbackVolume;
+    const availMult = availabilityMultiplier(row, statGroup, settings);
 
     if (isHitting) {
       const relHR = reliabilityFactor(sample, kMap.hr);
@@ -275,12 +346,16 @@ function projectRowsWithReliability(rows, statGroup, settings) {
 
       return {
         ...row,
-        ab: expectedVolume,
-        hr: projHrRate * expectedVolume,
-        r: projRRate * expectedVolume,
-        rbi: projRbiRate * expectedVolume,
-        sb: projSbRate * expectedVolume,
+        ab: expectedVolume * availMult,
+        h: projAvg * expectedVolume * availMult,
+        hr: projHrRate * expectedVolume * availMult,
+        r: projRRate * expectedVolume * availMult,
+        rbi: projRbiRate * expectedVolume * availMult,
+        sb: projSbRate * expectedVolume * availMult,
+        bb: (Number(row.bb) || 0) * availMult,
+        k: (Number(row.k) || 0) * availMult,
         avg: projAvg,
+        availabilityMultiplier: availMult,
       };
     }
 
@@ -304,12 +379,13 @@ function projectRowsWithReliability(rows, statGroup, settings) {
 
     return {
       ...row,
-      ip: expectedVolume,
-      w: projWRate * expectedVolume,
-      k: projKRate * expectedVolume,
-      sv: projSvRate * expectedVolume,
+      ip: expectedVolume * availMult,
+      w: projWRate * expectedVolume * availMult,
+      k: projKRate * expectedVolume * availMult,
+      sv: projSvRate * expectedVolume * availMult,
       era: projEra,
       whip: projWhip,
+      availabilityMultiplier: availMult,
     };
   });
 }
@@ -453,6 +529,10 @@ function assignDollarValues(
       name:           p.name,
       mlbTeam:        p.mlb_team,
       positions:      safeParsePositions(p.positions),
+      status:         p.status || 'active',
+      depthChartRank: Number(p.depth_chart_rank) || null,
+      depthChartPosition: p.depth_chart_position || null,
+      availabilityMultiplier: Number(p.availabilityMultiplier) || 1,
       dollarValue,
       projectedValue: dollarValue,  // pre-draft: projected = dollar value
       rank:           p.rank,
@@ -964,6 +1044,9 @@ function mergeSettings(leagueSettings = {}) {
   if (slotsConfig.unknownKeys.length) {
     log.warn('ignoring unknown roster slot keys', { keys: slotsConfig.unknownKeys });
   }
+  const inputAvailability = leagueSettings.availability || {};
+  const inputInjury = inputAvailability.injuryMultipliers || {};
+  const inputDepth = inputAvailability.depthRankMultipliers || {};
 
   return {
     ...DEFAULTS,
@@ -985,6 +1068,16 @@ function mergeSettings(leagueSettings = {}) {
     unknownRosterSlotKeys: slotsConfig.unknownKeys,
     ignoredBenchSlots: slotsConfig.ignoredBench,
     legacyFlatRosterSlots: slotsConfig.legacyFlatSlots,
+    availability: {
+      injuryMultipliers: {
+        ...DEFAULTS.availability.injuryMultipliers,
+        ...inputInjury,
+      },
+      depthRankMultipliers: {
+        ...DEFAULTS.availability.depthRankMultipliers,
+        ...inputDepth,
+      },
+    },
   };
 }
 

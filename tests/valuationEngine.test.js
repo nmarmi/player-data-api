@@ -25,6 +25,9 @@ function makeHitter(overrides = {}) {
     avg: 0.3,
     obp: 0.38,
     slg: 0.52,
+    status: 'active',
+    depth_chart_rank: 1,
+    depth_chart_position: 'OF',
     ...overrides,
   };
 }
@@ -43,6 +46,9 @@ function makePitcher(overrides = {}) {
     k: 210,
     sv: 0,
     hld: 0,
+    status: 'active',
+    depth_chart_rank: 1,
+    depth_chart_position: 'SP',
     ...overrides,
   };
 }
@@ -197,6 +203,59 @@ describe('valuationEngine (US-7.3)', () => {
     const samePlayerInBase = base.valuations.find((v) => v.playerId === player.playerId);
     expect(samePlayerInBase).toBeTruthy();
     expect(player.projectedValue).not.toBe(samePlayerInBase.projectedValue);
+  });
+
+  test('injury + depth chart weighting lowers equivalent player value', () => {
+    const mirroredHitters = [
+      makeHitter({
+        player_id: 'mlb-300001',
+        name: 'Healthy Starter',
+        positions: JSON.stringify(['OF']),
+        status: 'active',
+        depth_chart_rank: 1,
+        depth_chart_position: 'OF',
+        hr: 30, r: 90, rbi: 95, sb: 15, avg: 0.3, ab: 550,
+      }),
+      makeHitter({
+        player_id: 'mlb-300002',
+        name: 'Injured Bench',
+        positions: JSON.stringify(['OF']),
+        status: 'il-10',
+        depth_chart_rank: 3,
+        depth_chart_position: 'OF',
+        hr: 30, r: 90, rbi: 95, sb: 15, avg: 0.3, ab: 550,
+      }),
+    ];
+    const mirrorPitchers = [
+      makePitcher({
+        player_id: 'mlb-400001',
+        name: 'Pitcher Anchor',
+        positions: JSON.stringify(['SP']),
+        status: 'active',
+        depth_chart_rank: 1,
+      }),
+    ];
+
+    const settings = mergeSettings({
+      numTeams: 1,
+      budget: 260,
+      minAB: 0,
+      minIP: 0,
+      rosterSlots: { OF: 2, UTIL: 0, C: 0, SP: 1, RP: 0, P: 0, BENCH: 0 },
+    });
+
+    const vals = computeValuations(
+      mirroredHitters,
+      mirrorPitchers,
+      buildPoolPlayers(mirroredHitters, mirrorPitchers),
+      settings
+    );
+
+    const healthy = vals.find((v) => v.playerId === 'mlb-300001');
+    const injured = vals.find((v) => v.playerId === 'mlb-300002');
+    expect(healthy).toBeTruthy();
+    expect(injured).toBeTruthy();
+    expect(healthy.dollarValue).toBeGreaterThan(injured.dollarValue);
   });
 
   test('integration-shape: Draft Kit body shape returns non-empty valuations', () => {
