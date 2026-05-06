@@ -97,38 +97,9 @@ function buildMlbPersonId(rawId, playerName, team, rowIndex) {
   return (stringHash(`${playerName}|${team}|${rowIndex}`) % 900000) + 100000;
 }
 
-function parseMlbTeamId(value) {
-  const parsed = toPositiveInt(value);
-  if (parsed) return parsed;
-  const match = String(value || '').match(/^mlb-(\d+)$/i);
-  return match ? toPositiveInt(match[1]) : null;
-}
-
 function findColumnIndex(headerFields, names) {
   const wanted = new Set(names.map((name) => name.toLowerCase()));
   return headerFields.findIndex((name) => wanted.has(String(name).trim().toLowerCase()));
-}
-
-function tokenizePositions(value) {
-  if (!value) return [];
-  const tokens = String(value)
-    .split(',')
-    .map((token) => token.trim().toUpperCase())
-    .filter(Boolean);
-  return [...new Set(tokens)];
-}
-
-function fallbackPositionsFromName(playerName) {
-  if (!playerName) return [];
-  const upper = String(playerName).toUpperCase();
-  const matches = upper.match(/\b(C|1B|2B|3B|SS|OF|DH|P|U)\b/g) || [];
-  return [...new Set(matches)];
-}
-
-function normalizePositions(rawPosition, playerName) {
-  const tokens = tokenizePositions(rawPosition).filter((token) => KNOWN_POSITIONS.includes(token));
-  if (tokens.length) return tokens;
-  return fallbackPositionsFromName(playerName).filter((token) => KNOWN_POSITIONS.includes(token));
 }
 
 function parseLine(line, columns, rowIndex) {
@@ -154,22 +125,13 @@ function parseLine(line, columns, rowIndex) {
     return Number.isFinite(n) ? n : 0;
   };
   const { playerName, position, team } = parsePlayerField(playerRaw);
-  const mlbTeam = team.toUpperCase();
-  const teamId = parseMlbTeamId(cell(columns.mlbTeamId)) || MLB_TEAM_IDS[mlbTeam] || null;
   const mlbPersonId = buildMlbPersonId(cell(columns.mlbPersonId), playerName, team, rowIndex);
-  const positions = normalizePositions(position, playerName);
-  const player = {
-    _sourceRow: rowIndex + 1,
+  return {
     mlbPersonId,
     playerId: `mlb-${mlbPersonId}`,
-    name: playerName,
-    mlbTeam,
-    mlbTeamId: teamId ? `mlb-${teamId}` : null,
-    status: 'active',
-    isAvailable: true,
-    positions,
     playerName,
-    position: positions.join(','),
+    team,
+    position,
     ab: num(columns.ab),
     r: num(columns.r),
     h: num(columns.h),
@@ -201,7 +163,6 @@ const headerFields = header.split(',').map((value) => value.trim());
 const statHeaders = headerFields.slice(1);
 const columns = {
   mlbPersonId: findColumnIndex(statHeaders, ['mlbPersonId', 'mlb_person_id', 'mlbamid']),
-  mlbTeamId: findColumnIndex(statHeaders, ['mlbTeamId', 'mlb_team_id', 'teamid', 'team_id']),
   ab: findColumnIndex(statHeaders, ['ab']),
   r: findColumnIndex(statHeaders, ['r']),
   h: findColumnIndex(statHeaders, ['h']),
@@ -225,22 +186,13 @@ if (missing.length) {
 const players = [];
 const skippedRows = [];
 for (let i = 1; i < lines.length; i++) {
-  const parsed = parseLine(lines[i], columns, i);
-  if (parsed.player) {
-    players.push(parsed.player);
-  } else {
-    skippedRows.push({ row: i + 1, reason: parsed.error || 'Unknown parse error' });
-  }
+  const row = parseLine(lines[i], columns, i);
+  if (row && row.playerName) players.push(row);
 }
 // Dedupe by playerId (mlb-{mlbPersonId})
 const seen = new Set();
-let duplicateCount = 0;
 const unique = players.filter((player) => {
-  if (seen.has(player.playerId)) {
-    duplicateCount += 1;
-    skippedRows.push({ row: player._sourceRow, reason: `Duplicate playerId ${player.playerId}` });
-    return false;
-  }
+  if (seen.has(player.playerId)) return false;
   seen.add(player.playerId);
   return true;
 }).map(({ _sourceRow, ...player }) => player);

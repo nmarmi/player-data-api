@@ -49,7 +49,14 @@ Player, license, and admin paths are also available without the `/api/v1/` prefi
 
 `leagueSettings` also accepts `numTeams`/`budget` aliases. `draftState` is optional — omit it to value all players. Returns `503` if season stats are unavailable in the DB.
 
-### POST /api/v1/analytics/usage — body
+- **License**: Send `X-API-Key: <key>` or `Authorization: Bearer <key>`.
+- **Player identity**: Every player includes `mlbPersonId` and `playerId` in the format `mlb-{mlbPersonId}`.
+- **GET /players** query params (optional):
+  - Base filters: `search`, `team`, `position`
+  - Numeric ranges: `minFpts`, `maxFpts`, `minHr`, `maxHr`, `minRbi`, `maxRbi`, `minAvg`, `maxAvg` (plus same pattern for `ab,r,h,bb,k,sb,obp,slg`)
+  - Sorting/paging: `sortBy`, `sortOrder` (`asc`/`desc`), `limit`, `offset`
+- **GET /players/filters** returns available `teams`, `positions`, and supported `sortFields`.
+- **POST /usage** body: `{ "event": "...", "timestamp": "ISO8601", "metadata": {} }`.
 
 ```json
 { "event": "player_drafted", "timestamp": "2025-06-01T18:00:00Z", "metadata": {} }
@@ -66,7 +73,7 @@ npm install
 npm start
 ```
 
-### Data ingestion
+Expected CSV columns: `Player,AB,R,H,1B,2B,3B,HR,RBI,BB,K,SB,CS,AVG,OBP,SLG,FPTS` plus optional `mlbPersonId` (`mlb_person_id`/`mlbamid` also accepted). The `Player` column should be like `"Name Position | TEAM"` (e.g. `Juan Soto OF | NYM`). Output is written to **data/players.json**; restart the API to pick it up.
 
 The API uses SQLite (`data/players.db`) as its primary data store, seeded and refreshed from the live MLB Stats API. On first start the DB is seeded from the bundled `data/players.json` if the DB is empty.
 
