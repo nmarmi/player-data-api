@@ -268,6 +268,39 @@ const SORTABLE_FIELDS = new Set([
   'fpts',
 ]);
 
+const MLB_TEAM_IDS = {
+  ARI: 109,
+  ATL: 144,
+  BAL: 110,
+  BOS: 111,
+  CHC: 112,
+  CIN: 113,
+  CLE: 114,
+  COL: 115,
+  CWS: 145,
+  DET: 116,
+  HOU: 117,
+  KC: 118,
+  LAA: 108,
+  LAD: 119,
+  MIA: 146,
+  MIL: 158,
+  MIN: 142,
+  NYM: 121,
+  NYY: 147,
+  OAK: 133,
+  PHI: 143,
+  PIT: 134,
+  SD: 135,
+  SEA: 136,
+  SF: 137,
+  STL: 138,
+  TB: 139,
+  TEX: 140,
+  TOR: 141,
+  WAS: 120,
+};
+
 function stringHash(input) {
   let hash = 0;
   const text = String(input || '');
@@ -291,33 +324,51 @@ function parseMlbPersonId(value) {
   return match ? toPositiveInt(match[1]) : null;
 }
 
+function parseMlbTeamId(value) {
+  const asNumber = toPositiveInt(value);
+  if (asNumber) return asNumber;
+  const match = String(value || '').match(/^mlb-(\d+)$/i);
+  return match ? toPositiveInt(match[1]) : null;
+}
+
 function inferMlbPersonId(player, index) {
   return (
     parseMlbPersonId(player.mlbPersonId) ||
     parseMlbPersonId(player.playerId) ||
     parseMlbPersonId(player.id) ||
-    ((stringHash(`${player.playerName || ''}|${player.team || ''}|${index}`) % 900000) + 100000)
+    ((stringHash(`${player.playerName || ''}|${player.mlbTeam || player.team || ''}|${index}`) % 900000) + 100000)
   );
 }
 
 function normalizePlayerRecord(player, index) {
   const mlbPersonId = inferMlbPersonId(player, index);
-  const { id, ...rest } = player;
+  const mlbTeam = String(player.mlbTeam || player.team || '').trim().toUpperCase();
+  const teamId = parseMlbTeamId(player.mlbTeamId) || MLB_TEAM_IDS[mlbTeam] || null;
+  const name = String(player.name || player.playerName || '').trim();
+  const positions = normalizePositions(player, name);
+  const status = String(player.status || 'active').trim().toLowerCase() || 'active';
+  const isAvailable = parseAvailability(player.isAvailable);
+  const { id, team, ...rest } = player;
   return {
     ...rest,
+    name,
+    playerName: name,
+    positions,
+    position: positions.join(','),
+    mlbTeam,
+    mlbTeamId: teamId ? `mlb-${teamId}` : null,
     mlbPersonId,
     playerId: `mlb-${mlbPersonId}`,
+    status,
+    isAvailable,
   };
 }
 
 function loadPlayers() {
-  let players = fallbackPlayers;
-  try {
-    if (fs.existsSync(playersPath)) {
-      players = JSON.parse(fs.readFileSync(playersPath, 'utf8'));
-    }
-  } catch (_) {}
-  return players.map(normalizePlayerRecord);
+  // DB-only mode: player list must come from the database.
+  const dbPlayers = loadPlayersFromDb();
+  if (dbPlayers) return dbPlayers;
+  return [];
 }
 
 function firstValue(value) {
@@ -444,13 +495,15 @@ function buildPlayersQuery(query = {}) {
 
 function matchesSearch(player, search) {
   if (!search) return true;
-  const name = String(player.playerName || '').toLowerCase();
-  const team = String(player.team || '').toLowerCase();
-  const position = String(player.position || '').toLowerCase();
+  const name = String(player.name || player.playerName || '').toLowerCase();
+  const team = String(player.mlbTeam || '').toLowerCase();
+  const teamId = String(player.mlbTeamId || '').toLowerCase();
+  const position = String((player.positions || []).join(',') || player.position || '').toLowerCase();
   const playerId = String(player.playerId || '').toLowerCase();
   return (
     name.includes(search) ||
     team.includes(search) ||
+    teamId.includes(search) ||
     position.includes(search) ||
     playerId.includes(search)
   );
