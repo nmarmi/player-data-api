@@ -10,6 +10,7 @@ const licenseRouter    = require('./routes/license');
 const playersRouter    = require('./routes/players');
 const analyticsRouter  = require('./routes/analytics');
 const developerRouter  = require('./routes/developer');
+const eventsRouter     = require('./routes/events');
 const adminRouter      = require('./routes/admin');
 
 const app = express();
@@ -82,6 +83,7 @@ app.use(`/api/${API_VERSION}/license`, licenseRouter);
 app.use(`/api/${API_VERSION}/players`, playersRouter);
 app.use(`/api/${API_VERSION}/analytics`, analyticsRouter);
 app.use(`/api/${API_VERSION}/developer`, developerRouter);
+app.use(`/api/${API_VERSION}/events`, eventsRouter);
 app.use(`/api/${API_VERSION}/admin`, adminRouter);
 
 // Legacy unversioned routes (aliases — kept for backwards compatibility)

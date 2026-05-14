@@ -212,12 +212,14 @@ function applyTransactionUpdates(playerUpdates, rawTxns) {
        @from_team_id, @to_team_id, @effective_date, @description)
   `);
 
+  const { writeEvent } = (() => { try { return require('../db/eventsLog'); } catch (_) { return { writeEvent: () => null }; } })();
+
   let teamUpdated   = 0;
   let statusUpdated = 0;
   let txnsInserted  = 0;
+  const newTxnEvents = [];
 
   const run = db.transaction(() => {
-    // Apply player-level updates
     for (const [playerId, fields] of playerUpdates.entries()) {
       if (fields.mlb_team && fields.mlb_team_id) {
         const info = updateTeam.run({
@@ -238,7 +240,6 @@ function applyTransactionUpdates(playerUpdates, rawTxns) {
       }
     }
 
-    // Insert audit rows for every relevant raw transaction
     for (const txn of rawTxns) {
       const mlbId = Number(txn?.person?.id);
       if (!Number.isFinite(mlbId) || mlbId <= 0) continue;
@@ -253,11 +254,35 @@ function applyTransactionUpdates(playerUpdates, rawTxns) {
         effective_date: txn.effectiveDate || txn.date || '',
         description:    txn.description  || null,
       });
-      if (info.changes) txnsInserted++;
+      if (info.changes) {
+        txnsInserted++;
+        // US-13.1: queue event emission after the transaction commits
+        newTxnEvents.push({
+          playerId:  `mlb-${mlbId}`,
+          typeCode:  txn.typeCode || '',
+          typeDesc:  txn.typeDesc || '',
+          fromTeam:  txn.fromTeam?.name ?? null,
+          toTeam:    txn.toTeam?.name   ?? null,
+          effectiveDate: txn.effectiveDate || txn.date || '',
+          description: txn.description || null,
+        });
+      }
     }
   });
 
   run();
+
+  // US-13.1: emit player.transaction events after DB commit
+  const dataAsOf = new Date().toISOString();
+  for (const t of newTxnEvents) {
+    writeEvent('player.transaction', t.playerId, {
+      newValue: { typeCode: t.typeCode, typeDesc: t.typeDesc, toTeam: t.toTeam, description: t.description },
+      priorValue: { fromTeam: t.fromTeam },
+      effectiveDate: t.effectiveDate,
+      dataAsOf,
+    });
+  }
+
   return { teamUpdated, statusUpdated, txnsInserted };
 }
 

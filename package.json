@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "jest --runInBand",
+    "test": "jest --runInBand --forceExit",
     "test:watch": "jest --watch",
     "import-csv": "node scripts/csv-to-players.js",
     "import-mlb": "node scripts/fetch-mlb-data.js",

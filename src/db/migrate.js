@@ -180,6 +180,21 @@ function migrate() {
     )
   `);
 
+  // US-13.1: push notification events — written by ingestion jobs, read by SSE stream
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS events (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      type          TEXT    NOT NULL,
+      player_id     TEXT    NOT NULL,
+      payload       TEXT    NOT NULL DEFAULT '{}',
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+      dispatched_at TEXT
+    )
+  `);
+
+  // US-13.2: webhook URL per api_key (optional; null = SSE only)
+  try { db.exec('ALTER TABLE api_keys ADD COLUMN webhook_url TEXT'); } catch (_) {}
+
   // US-10.4: API key usage audit log (rolling 30-day TTL enforced on write)
   db.exec(`
     CREATE TABLE IF NOT EXISTS api_key_usage_log (

@@ -63,9 +63,14 @@ function exampleBodyFor(openapiPath, method) {
     return { event: 'spec-smoke', timestamp: new Date().toISOString() };
   }
   if (openapiPath === '/admin/refresh') {
-    // We don't actually trigger an ingest run during tests — admin auth is
-    // expected to fail without a key, which is what we assert.
     return {};
+  }
+  if (openapiPath === '/admin/events') {
+    // synthetic event — admin auth will reject without key (that's the assertion)
+    return { type: 'player.injury', playerId: 'mlb-660271', payload: {} };
+  }
+  if (openapiPath === '/events/webhook') {
+    return { webhookUrl: 'https://example.com/hook' };
   }
   return undefined;
 }
@@ -90,6 +95,15 @@ describe('US-8.3 OpenAPI drift-guard', () => {
 
       for (const method of Object.keys(ops)) {
         if (!['get', 'post', 'put', 'patch', 'delete'].includes(method)) continue;
+
+        // SSE streaming endpoints cannot be tested with a single request/response cycle
+        // — supertest hangs because the connection stays open. Skip them here; they are
+        // covered by the dedicated events.test.js suite.
+        const op = ops[method] || {};
+        const isStreamingEndpoint =
+          op.responses?.['200']?.content &&
+          Object.keys(op.responses['200'].content).some((ct) => ct.includes('event-stream'));
+        if (isStreamingEndpoint) continue;
 
         let req = request(app)[method](concretePath).set('X-API-Key', process.env.API_LICENSE_KEY);
         const body = exampleBodyFor(docPath, method);

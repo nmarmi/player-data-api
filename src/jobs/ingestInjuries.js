@@ -242,6 +242,15 @@ async function buildTransactionStatusMap() {
 function applyStatusUpdates(combinedMap) {
   const db = getDb();
 
+  // US-13.1: read prior statuses so we can emit events on real changes
+  let { writeEvent } = (() => { try { return require('../db/eventsLog'); } catch (_) { return { writeEvent: () => null }; } })();
+
+  const priorStatuses = new Map();
+  try {
+    const rows = db.prepare('SELECT player_id, status FROM players').all();
+    for (const r of rows) priorStatuses.set(r.player_id, r.status);
+  } catch (_) {}
+
   const updateStatus = db.prepare(`
     UPDATE players
     SET status       = @status,
@@ -251,8 +260,6 @@ function applyStatusUpdates(combinedMap) {
       AND (status != @status OR is_available != @is_available)
   `);
 
-  // Reset players who are no longer on any 40-man roster back to active.
-  // json_each lets SQLite unpack a JSON array of IDs inline.
   const resetAbsent = db.prepare(`
     UPDATE players
     SET status       = 'active',
@@ -264,12 +271,16 @@ function applyStatusUpdates(combinedMap) {
 
   let updated = 0;
   let cleared = 0;
+  const changedPlayers = [];
 
   const run = db.transaction(() => {
     for (const [playerId, status] of combinedMap.entries()) {
       const available = isAvailableStatus(status) ? 1 : 0;
       const info = updateStatus.run({ player_id: playerId, status, is_available: available });
-      if (info.changes) updated++;
+      if (info.changes) {
+        updated++;
+        changedPlayers.push({ playerId, newStatus: status, priorStatus: priorStatuses.get(playerId) || 'active' });
+      }
     }
 
     const ids = JSON.stringify([...combinedMap.keys()]);
@@ -278,6 +289,13 @@ function applyStatusUpdates(combinedMap) {
   });
 
   run();
+
+  // US-13.1: emit player.injury events for every status change
+  const dataAsOf = new Date().toISOString();
+  for (const { playerId, newStatus, priorStatus } of changedPlayers) {
+    writeEvent('player.injury', playerId, { newValue: newStatus, priorValue: priorStatus, dataAsOf });
+  }
+
   return { updated, cleared };
 }
 

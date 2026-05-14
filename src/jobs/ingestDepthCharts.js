@@ -161,6 +161,7 @@ async function buildDepthChartMap() {
 
 function applyDepthChartUpdates(depthMap) {
   const db = getDb();
+  const { writeEvent } = (() => { try { return require('../db/eventsLog'); } catch (_) { return { writeEvent: () => null }; } })();
 
   // Ensure columns exist (idempotent — migrate.js also does this on startup)
   for (const col of [
@@ -169,6 +170,13 @@ function applyDepthChartUpdates(depthMap) {
   ]) {
     try { db.exec(col); } catch (_) {}
   }
+
+  // US-13.1: read prior depth chart state
+  const priorDepth = new Map();
+  try {
+    const rows = db.prepare('SELECT player_id, depth_chart_rank, depth_chart_position FROM players').all();
+    for (const r of rows) priorDepth.set(r.player_id, { rank: r.depth_chart_rank, position: r.depth_chart_position });
+  } catch (_) {}
 
   const update = db.prepare(`
     UPDATE players
@@ -179,7 +187,6 @@ function applyDepthChartUpdates(depthMap) {
       AND (depth_chart_rank IS NOT @rank OR depth_chart_position IS NOT @position)
   `);
 
-  // Players no longer appearing in any depth chart have their values cleared
   const clearAbsent = db.prepare(`
     UPDATE players
     SET depth_chart_rank     = NULL,
@@ -191,11 +198,15 @@ function applyDepthChartUpdates(depthMap) {
 
   let updated = 0;
   let cleared = 0;
+  const changedPlayers = [];
 
   const run = db.transaction(() => {
     for (const [playerId, { rank, position }] of depthMap.entries()) {
       const info = update.run({ player_id: playerId, rank, position });
-      if (info.changes) updated++;
+      if (info.changes) {
+        updated++;
+        changedPlayers.push({ playerId, newRank: rank, newPosition: position, prior: priorDepth.get(playerId) });
+      }
     }
 
     const ids = JSON.stringify([...depthMap.keys()]);
@@ -204,6 +215,17 @@ function applyDepthChartUpdates(depthMap) {
   });
 
   run();
+
+  // US-13.1: emit player.depthChart events
+  const dataAsOf = new Date().toISOString();
+  for (const { playerId, newRank, newPosition, prior } of changedPlayers) {
+    writeEvent('player.depthChart', playerId, {
+      newValue:  { rank: newRank,      position: newPosition },
+      priorValue: { rank: prior?.rank ?? null, position: prior?.position ?? null },
+      dataAsOf,
+    });
+  }
+
   return { updated, cleared };
 }
 

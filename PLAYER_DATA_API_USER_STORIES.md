@@ -874,7 +874,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 
 > **Rubric mapping:** "Mechanism to Force New Notification-worthy info via Player API" (5pt) — the Player Data API's half of the 10pt push category. (The Draft Kit's half — show pushed state + notification UI — is its Epic 25.)
 
-### US-13.1: Notification-worthy event detection
+### US-13.1: Notification-worthy event detection ✅ COMPLETED
 **As a** Player Data API maintainer, **I want** the ingestion jobs to flag every "newsworthy" change (status flip, depth-chart move, transaction) onto an event stream, **so that** subscribed Draft Kits can react.
 
 **Acceptance criteria:**
@@ -883,7 +883,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 - Per-event payload includes the new value, prior value, and `dataAsOf`
 - Backfill safeguard: events older than 24h on first deploy are NOT replayed (avoid notification storm)
 
-### US-13.2: Push delivery channel (Server-Sent Events + webhook)
+### US-13.2: Push delivery channel (Server-Sent Events + webhook) ✅ COMPLETED
 **As a** Draft Kit, **I want** to subscribe to a stream of events scoped to my session's available player pool, **so that** my UI updates without polling.
 
 **Acceptance criteria:**
@@ -893,7 +893,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 - Optional webhook mode: developer accounts (Epic 10) can register a `webhookUrl`; events POST to it with HMAC signature
 - Reconnection support: client passes `?since=<lastEventId>` to resume
 
-### US-13.3: Force-trigger admin endpoint (manual notification injection)
+### US-13.3: Force-trigger admin endpoint (manual notification injection) ✅ COMPLETED
 **As a** Player Data API operator demoing the system, **I want** to inject a synthetic notification on demand, **so that** the rubric demo doesn't depend on the MLB Stats API actually publishing news during the grading window.
 
 **Acceptance criteria:**

@@ -326,6 +326,63 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
 
+  /admin/events:
+    post:
+      summary: Inject a synthetic push-notification event for demos (US-13.3)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, playerId]
+              properties:
+                type: { type: string, enum: [player.injury, player.transaction, player.depthChart] }
+                playerId: { type: string }
+                payload: { type: object }
+      responses:
+        '201': { description: Event created }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /events/stream:
+    get:
+      summary: Server-Sent Events stream of player notification events (US-13.2)
+      parameters:
+        - in: query
+          name: playerIds
+          schema: { type: string }
+          description: Comma-separated player IDs to filter on
+        - in: query
+          name: since
+          schema: { type: integer }
+          description: Resume from last received event id
+      responses:
+        '200':
+          description: SSE stream (text/event-stream)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /events/webhook:
+    post:
+      summary: Register a webhook URL for push delivery (US-13.2)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [webhookUrl]
+              properties:
+                webhookUrl: { type: string, format: uri }
+      responses:
+        '200': { description: Webhook registered }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
   /admin/keys/{keyId}/usage:
     get:
       summary: Recent usage rows for an API key (US-10.4)
