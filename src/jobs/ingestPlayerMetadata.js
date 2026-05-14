@@ -195,7 +195,7 @@ function upsertPlayers(rows) {
   const db = getDb();
 
   const existing = db
-    .prepare('SELECT player_id, name, mlb_team, status, positions FROM players')
+    .prepare('SELECT player_id, name, mlb_team, status, positions, birth_date FROM players')
     .all();
   const existingMap = new Map(existing.map((r) => [r.player_id, r]));
 
@@ -237,7 +237,9 @@ function upsertPlayers(rows) {
           prev.name      !== row.name      ||
           prev.mlb_team  !== row.mlb_team  ||
           prev.status    !== row.status    ||
-          prev.positions !== row.positions;
+          prev.positions !== row.positions ||
+          // US-11.3: backfill birth_date when previously null
+          (!prev.birth_date && row.birth_date);
         if (changed) {
           upsert.run(row);
           updated++;
