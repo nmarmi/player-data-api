@@ -1,9 +1,13 @@
 const Database = require('better-sqlite3');
 const path = require('path');
 
-const DB_PATH = process.env.DB_PATH
-  ? path.resolve(process.cwd(), process.env.DB_PATH)
-  : path.join(__dirname, '..', '..', 'data', 'players.db');
+// Special case: when DB_PATH is the literal ":memory:", pass it straight to better-sqlite3
+// so SQLite uses its true in-memory mode. Otherwise resolve as a real filesystem path.
+const DB_PATH = process.env.DB_PATH === ':memory:'
+  ? ':memory:'
+  : process.env.DB_PATH
+    ? path.resolve(process.cwd(), process.env.DB_PATH)
+    : path.join(__dirname, '..', '..', 'data', 'players.db');
 
 let db = null;
 

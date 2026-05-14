@@ -321,6 +321,16 @@ function loadStatRows(season, group) {
 }
 
 /**
+ * Resolves the canonical "stat season" for valuation: explicit override or
+ * last-completed calendar year.  Centralised so all call-sites agree.
+ * @param {object} settings — merged league settings
+ * @returns {number}
+ */
+function getStatSeason(settings) {
+  return Number(settings?.statSeason) || (new Date().getFullYear() - 1);
+}
+
+/**
  * US-11.3: Parses the age multiplier curve from leagueSettings or the
  * VALUATION_AGE_CURVE env var.  Falls back to DEFAULTS.ageCurve.
  * @param {object|undefined} inputCurve
@@ -649,7 +659,7 @@ function projectRowsWithReliability(rows, statGroup, settings) {
 
     // US-11.3: age factor — only applied when leagueSettings.ageFactor === true
     const { age, multiplier: ageMult } = settings.ageFactor
-      ? computeAgeMultiplier(row.birth_date, settings.statSeason || (new Date().getFullYear() - 1), settings.ageCurve)
+      ? computeAgeMultiplier(row.birth_date, getStatSeason(settings), settings.ageCurve)
       : { age: null, multiplier: 1.0 };
     const combinedMult = availMult * ageMult;
 
@@ -1561,8 +1571,7 @@ function computeValuations(hitterRows, pitcherRows, poolPlayers, settings) {
  */
 function runValuations(leagueSettings = {}, draftState = {}) {
   const settings = mergeSettings(leagueSettings);
-  // Default to last calendar year if no specific season is requested
-  const season   = settings.statSeason || (new Date().getFullYear() - 1);
+  const season   = getStatSeason(settings);
 
   // STEP 1: Load all hitter and pitcher stat rows for the target season (or 3-year weighted,
   //         or projections if available — US-11.2)
@@ -1677,7 +1686,7 @@ function runValuations(leagueSettings = {}, draftState = {}) {
 
 function getExclusionDiagnostics(leagueSettings = {}, draftState = {}, opts = {}) {
   const settings = mergeSettings(leagueSettings);
-  const season = settings.statSeason || (new Date().getFullYear() - 1);
+  const season = getStatSeason(settings);
   const targetIds = Array.isArray(opts.playerIds) ? opts.playerIds.filter(Boolean) : [];
 
   const { rows: allHitters  } = loadStatRowsForSettings(settings, season, 'hitting');

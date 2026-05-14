@@ -13,8 +13,12 @@ services:
         value: "true"
       - key: API_LICENSE_KEY
         sync: false
-      - key: ADMIN_KEY
+      - key: ADMIN_API_KEY
         sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: TRUST_PROXY
+        value: "true"
     disk:
       name: players-db
       mountPath: /data

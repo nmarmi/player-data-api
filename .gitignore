@@ -2,3 +2,22 @@ node_modules/
 .env
 *.log
 .DS_Store
+
+# SQLite database files — should never be committed (binary, host-specific, may contain secrets)
+data/players.db
+data/players.db-shm
+data/players.db-wal
+
+# Test artifacts (the :memory: literal-name file produced by the test DB connection)
+:memory:
+:memory:-shm
+:memory:-wal
+
+# Build output
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp

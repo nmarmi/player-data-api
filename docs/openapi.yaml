@@ -481,9 +481,31 @@ components:
         mlbTeam: { type: string }
         statGroup: { type: string, enum: [hitting, pitching, unscored] }
         projectedValue: { type: number }
+        dollarValue: { type: number }
         rank: { type: integer }
         purchasePrice: { type: number, nullable: true, description: "Set when this player is in draftState.purchasedPlayers" }
         valueGap: { type: number, nullable: true, description: "projectedValue - purchasePrice; null for available players" }
+        # US-11.4: per-player injury status discount (e.g. IL-60 → 0.6 multiplier)
+        injuryAdjustment:
+          type: object
+          nullable: true
+          properties:
+            status: { type: string, description: "Normalised status key — active | dtd | il_10 | il_15 | il_60 | minors | dfa | …" }
+            multiplier: { type: number, description: "0.0 (minors/DFA) to 1.0 (active)" }
+        # US-11.5: per-player depth-chart rank discount
+        depthChartAdjustment:
+          type: object
+          nullable: true
+          properties:
+            rank: { type: integer, nullable: true, description: "1 = starter; null = uncharted" }
+            multiplier: { type: number, description: "0.4 (deep bench) to 1.0 (rank 1)" }
+        # US-11.3: dynasty-league age multiplier (only present when leagueSettings.ageFactor=true)
+        ageAdjustment:
+          type: object
+          nullable: true
+          properties:
+            age: { type: integer, nullable: true, description: "Age at April 1 of the season" }
+            multiplier: { type: number, description: "1.05 (≤22) to 0.85 (35+)" }
 
     Recommendation:
       type: object
