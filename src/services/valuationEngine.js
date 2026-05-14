@@ -75,20 +75,24 @@ const DEFAULTS = {
   },
   // Availability/role adjustment settings (US rubric: injury + depth chart used).
   availability: {
+    // US-11.4: multipliers per injury status. Override via VALUATION_INJURY_DISCOUNTS env var (JSON).
+    // minors / dfa are 0.0 — player is not on the active roster; they contribute nothing this season.
     injuryMultipliers: {
-      active: 1.0,
-      dtd: 0.95,
-      day_to_day: 0.95,
-      probable: 0.97,
+      active:      1.0,
+      dtd:         0.97,
+      day_to_day:  0.97,
+      probable:    0.99,
       questionable: 0.9,
-      il_7: 0.9,
-      il_10: 0.85,
-      il_15: 0.8,
-      il_60: 0.55,
-      out: 0.6,
-      suspended: 0.75,
-      bereavement: 0.85,
-      restricted: 0.75,
+      il_7:        0.95,
+      il_10:       0.95,
+      il_15:       0.93,
+      il_60:       0.6,
+      out:         0.6,
+      suspended:   0.75,
+      bereavement: 0.9,
+      restricted:  0.75,
+      minors:      0.0,
+      dfa:         0.0,
     },
     depthRankMultipliers: {
       '1': 1.0,
@@ -157,19 +161,62 @@ function normalizeStatusKey(status) {
     .replace(/[^a-z0-9]+/g, '_');
 }
 
+/**
+ * US-11.4: Reads the injury multiplier map — DEFAULTS merged with the
+ * VALUATION_INJURY_DISCOUNTS env var (JSON object) and any per-request override.
+ */
+function resolveInjuryMap(settings) {
+  const base = { ...DEFAULTS.availability.injuryMultipliers, ...(settings?.availability?.injuryMultipliers || {}) };
+  const env = process.env.VALUATION_INJURY_DISCOUNTS;
+  if (env) {
+    try { return { ...base, ...JSON.parse(env) }; } catch (_) {}
+  }
+  return base;
+}
+
+/**
+ * US-11.4: Returns { multiplier, statusKey } for the player's current injury status.
+ * multiplier is 0.0 for minors/DFA (player not on active roster this season).
+ * @returns {{ multiplier: number, statusKey: string }}
+ */
 function injuryMultiplierForStatus(status, settings) {
-  const map = settings?.availability?.injuryMultipliers || DEFAULTS.availability.injuryMultipliers;
+  const map = resolveInjuryMap(settings);
   const normalized = normalizeStatusKey(status);
-  if (!normalized || normalized === 'active') return 1.0;
-  if (Object.prototype.hasOwnProperty.call(map, normalized)) return Number(map[normalized]) || 1.0;
-  // Handle common IL statuses like "il-10", "il10", "10-day il".
-  if (normalized.includes('il_60') || normalized.includes('60_day_il')) return Number(map.il_60) || 0.55;
-  if (normalized.includes('il_15') || normalized.includes('15_day_il')) return Number(map.il_15) || 0.8;
-  if (normalized.includes('il_10') || normalized.includes('10_day_il')) return Number(map.il_10) || 0.85;
-  if (normalized.includes('il_7') || normalized.includes('7_day_il')) return Number(map.il_7) || 0.9;
-  if (normalized.includes('dtd') || normalized.includes('day_to_day')) return Number(map.dtd) || 0.95;
-  if (normalized.includes('out')) return Number(map.out) || 0.6;
-  return 1.0;
+  const rawStatus = String(status || '').toLowerCase().trim();
+
+  if (!normalized || normalized === 'active') return { multiplier: 1.0, statusKey: 'active' };
+
+  if (Object.prototype.hasOwnProperty.call(map, normalized)) {
+    return { multiplier: Number(map[normalized]), statusKey: normalized };
+  }
+
+  // Handle common IL status strings from the ingest layer
+  if (normalized.includes('il_60') || normalized.includes('60_day') || rawStatus.includes('60-day')) {
+    return { multiplier: Number(map.il_60) ?? 0.6, statusKey: 'il_60' };
+  }
+  if (normalized.includes('il_15') || normalized.includes('15_day') || rawStatus.includes('15-day')) {
+    return { multiplier: Number(map.il_15) ?? 0.93, statusKey: 'il_15' };
+  }
+  if (normalized.includes('il_10') || normalized.includes('10_day') || rawStatus.includes('10-day')) {
+    return { multiplier: Number(map.il_10) ?? 0.95, statusKey: 'il_10' };
+  }
+  if (normalized.includes('il_7') || normalized.includes('7_day') || rawStatus.includes('7-day')) {
+    return { multiplier: Number(map.il_7) ?? 0.95, statusKey: 'il_7' };
+  }
+  if (normalized.includes('dtd') || normalized.includes('day_to_day')) {
+    return { multiplier: Number(map.dtd) ?? 0.97, statusKey: 'dtd' };
+  }
+  if (normalized.includes('minors') || normalized === 'min') {
+    return { multiplier: Number(map.minors) ?? 0.0, statusKey: 'minors' };
+  }
+  if (normalized.includes('dfa')) {
+    return { multiplier: Number(map.dfa) ?? 0.0, statusKey: 'dfa' };
+  }
+  if (normalized.includes('out')) {
+    return { multiplier: Number(map.out) ?? 0.6, statusKey: 'out' };
+  }
+
+  return { multiplier: 1.0, statusKey: normalized };
 }
 
 function depthChartMultiplier(row, statGroup, settings) {
@@ -188,11 +235,21 @@ function depthChartMultiplier(row, statGroup, settings) {
   return Number(cfg.defaultBench) || 0.4;
 }
 
+/**
+ * US-11.4: Returns combined availability multiplier and the injury breakdown.
+ * minors/DFA are 0.0 — they bypass the depth-chart calc and the floor clamp.
+ * @returns {{ multiplier: number, injuryAdjustment: { status: string, multiplier: number } }}
+ */
 function availabilityMultiplier(row, statGroup, settings) {
-  const injury = injuryMultiplierForStatus(row.status, settings);
-  const depth = depthChartMultiplier(row, statGroup, settings);
-  // Keep adjustment bounded so it is meaningful but not dominant.
-  return Math.max(0.25, Math.min(1.1, injury * depth));
+  const { multiplier: injuryMult, statusKey } = injuryMultiplierForStatus(row.status, settings);
+  const injuryAdjustment = { status: statusKey, multiplier: injuryMult };
+
+  // Players in the minors / DFA / released don't contribute this season — return 0 directly
+  if (injuryMult <= 0) return { multiplier: 0.0, injuryAdjustment };
+
+  const depthMult = depthChartMultiplier(row, statGroup, settings);
+  const combined  = Math.max(0.25, Math.min(1.1, injuryMult * depthMult));
+  return { multiplier: combined, injuryAdjustment };
 }
 
 // ── DB loader ─────────────────────────────────────────────────────────────────
@@ -552,7 +609,7 @@ function projectRowsWithReliability(rows, statGroup, settings) {
   return rows.map((row) => {
     const sample = Math.max(0, Number(row[volumeField]) || 0);
     const expectedVolume = sample > 0 ? sample : fallbackVolume;
-    const availMult = availabilityMultiplier(row, statGroup, settings);
+    const { multiplier: availMult, injuryAdjustment } = availabilityMultiplier(row, statGroup, settings);
 
     // US-11.3: age factor — only applied when leagueSettings.ageFactor === true
     const { age, multiplier: ageMult } = settings.ageFactor
@@ -591,6 +648,7 @@ function projectRowsWithReliability(rows, statGroup, settings) {
         k: (Number(row.k) || 0) * combinedMult,
         avg: projAvg,
         availabilityMultiplier: availMult,
+        injuryAdjustment,
         ageAdjustment: { age, multiplier: ageMult },
       };
     }
@@ -622,6 +680,7 @@ function projectRowsWithReliability(rows, statGroup, settings) {
       era: projEra,
       whip: projWhip,
       availabilityMultiplier: availMult,
+      injuryAdjustment,
       ageAdjustment: { age, multiplier: ageMult },
     };
   });
@@ -770,6 +829,7 @@ function assignDollarValues(
       depthChartRank: Number(p.depth_chart_rank) || null,
       depthChartPosition: p.depth_chart_position || null,
       availabilityMultiplier: Number(p.availabilityMultiplier) || 1,
+      injuryAdjustment: p.injuryAdjustment || null,
       ageAdjustment: p.ageAdjustment || null,
       dollarValue,
       projectedValue: dollarValue,  // pre-draft: projected = dollar value

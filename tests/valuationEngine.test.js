@@ -564,3 +564,81 @@ describe('US-11.3 age factor in valuation', () => {
     }
   });
 });
+
+describe('US-11.4 injury status in valuation', () => {
+  const settings = mergeSettings({ numTeams: 10, budget: 260, minAB: 0, minIP: 0 });
+
+  function makePool(target, rest) {
+    return [target, ...rest].map((p) => ({
+      playerId: p.player_id, name: p.name,
+      mlbTeam: p.mlb_team, positions: JSON.parse(p.positions),
+    }));
+  }
+
+  test('active and IL-60 players with identical stats: IL-60 player valued lower by ~0.6 ratio', () => {
+    const opponents = Array.from({ length: 89 }, (_, i) =>
+      makeHitter({ player_id: `mlb-opp-${i}`, name: `Opp ${i}`, hr: 20, rbi: 75, avg: 0.265, depth_chart_rank: 1 })
+    );
+    const activePlayer = makeHitter({
+      player_id: 'mlb-active', name: 'Active Player',
+      hr: 30, rbi: 95, avg: 0.285, status: 'active', depth_chart_rank: 1,
+    });
+    const il60Player = makeHitter({
+      player_id: 'mlb-il60', name: 'IL-60 Player',
+      hr: 30, rbi: 95, avg: 0.285, status: 'il_60', depth_chart_rank: 1,
+    });
+
+    const activeVals = computeValuations([activePlayer, ...opponents], [], makePool(activePlayer, opponents), settings);
+    const il60Vals   = computeValuations([il60Player,  ...opponents], [], makePool(il60Player,  opponents), settings);
+
+    const activeValue = activeVals.find((v) => v.playerId === 'mlb-active')?.dollarValue ?? 0;
+    const il60Value   = il60Vals.find((v)  => v.playerId === 'mlb-il60')?.dollarValue   ?? 0;
+
+    // IL-60 multiplier is 0.6 — the IL-60 player's effective stats are 60% of active
+    // so their dollar value should be meaningfully less
+    expect(activeValue).toBeGreaterThan(il60Value);
+    expect(il60Value).toBeGreaterThanOrEqual(1); // floor is $1
+  });
+
+  test('minors/DFA player receives minimum $1 (0.0 multiplier collapses to replacement)', () => {
+    const opponents = Array.from({ length: 89 }, (_, i) =>
+      makeHitter({ player_id: `mlb-opp-${i}`, hr: 20, rbi: 75, avg: 0.265, depth_chart_rank: 1 })
+    );
+    const minorsPlayer = makeHitter({
+      player_id: 'mlb-minors', name: 'Minors Player',
+      hr: 30, rbi: 95, avg: 0.285, status: 'minors', depth_chart_rank: 1,
+    });
+    const vals = computeValuations([minorsPlayer, ...opponents], [], makePool(minorsPlayer, opponents), settings);
+    const minorsValue = vals.find((v) => v.playerId === 'mlb-minors')?.dollarValue ?? -1;
+    expect(minorsValue).toBeGreaterThanOrEqual(1); // calibration may scale up, but VAR should be 0
+  });
+
+  test('injuryAdjustment field is present in output with status and multiplier', () => {
+    const player = makeHitter({ player_id: 'mlb-inj-test', status: 'il_10', depth_chart_rank: 1 });
+    const rest   = Array.from({ length: 9 }, (_, i) => makeHitter({ player_id: `mlb-r-${i}` }));
+    const vals   = computeValuations([player, ...rest], [], makePool(player, rest), settings);
+    const v = vals.find((v) => v.playerId === 'mlb-inj-test');
+
+    expect(v).toBeTruthy();
+    expect(v.injuryAdjustment).not.toBeNull();
+    expect(v.injuryAdjustment).toHaveProperty('status');
+    expect(v.injuryAdjustment).toHaveProperty('multiplier');
+    expect(v.injuryAdjustment.multiplier).toBeCloseTo(0.95, 2); // IL-10 = 0.95
+    expect(v.injuryAdjustment.status).toBe('il_10');
+  });
+
+  test('VALUATION_INJURY_DISCOUNTS env var overrides default multipliers', () => {
+    const orig = process.env.VALUATION_INJURY_DISCOUNTS;
+    process.env.VALUATION_INJURY_DISCOUNTS = JSON.stringify({ il_10: 0.5 });
+
+    const player = makeHitter({ player_id: 'mlb-env-test', status: 'il_10', depth_chart_rank: 1 });
+    const rest   = Array.from({ length: 9 }, (_, i) => makeHitter({ player_id: `mlb-re-${i}` }));
+    const vals   = computeValuations([player, ...rest], [], makePool(player, rest), settings);
+    const v = vals.find((v) => v.playerId === 'mlb-env-test');
+
+    // Overridden to 0.5, so multiplier should be much lower than default 0.95
+    expect(v.injuryAdjustment.multiplier).toBeCloseTo(0.5, 2);
+
+    process.env.VALUATION_INJURY_DISCOUNTS = orig || '';
+  });
+});

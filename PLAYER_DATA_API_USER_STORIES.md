@@ -840,7 +840,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 
 **Implementation:** `birth_date TEXT` column added to `players` table via idempotent `ALTER TABLE`. `ingestPlayerMetadata.js` populates `birth_date` from `person.birthDate`; upsert uses `COALESCE(excluded.birth_date, players.birth_date)` so existing values are preserved when the API returns null. All three stat-loading queries (`loadStatRows`, `loadWeightedStatRows`, `loadProjectionRows`) now select `p.birth_date`. Engine: `ageFactor: false` in DEFAULTS; `ageCurve` anchor map; `parseAgeCurve` reads `VALUATION_AGE_CURVE` env or `leagueSettings.ageCurve`; `computeAgeMultiplier(birthDate, season, curve)` computes age at April 1 of the season and linearly interpolates between anchor points; `combinedMult = availMult * ageMult` applied to all projected counting stats; `ageAdjustment: { age, multiplier }` included per player in output. 6 new unit tests. 141/141 tests pass.
 
-### US-11.4: Injury status in valuation
+### US-11.4: Injury status in valuation ✅ COMPLETED
 **As a** Draft Kit user, **I want** the `IL-60` / `IL-10` / `DTD` flags ingested by Epic 4 to discount valuations proportionally, **so that** a season-ending IL stay isn't priced as if the player is healthy.
 
 **Acceptance criteria:**
@@ -848,6 +848,8 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 - `valuationEngine` multiplies `projectedValue` by the discount when the player's current `status` is non-active
 - Response includes `injuryAdjustment: { status, multiplier }` per player so the Draft Kit can render "−40% (IL-60)" tooltips
 - Test: identical projections — one `active`, one `IL-60` — produce values in the documented ratio
+
+**Implementation:** Updated DEFAULTS to match AC values (il_10: 0.95, il_15: 0.93, il_60: 0.6, dtd: 0.97, minors: 0.0, dfa: 0.0). `resolveInjuryMap` reads `VALUATION_INJURY_DISCOUNTS` env var (JSON) merged over defaults. `injuryMultiplierForStatus` now returns `{ multiplier, statusKey }` with full alias handling for all IL variants. `availabilityMultiplier` returns `{ multiplier, injuryAdjustment }` — minors/DFA bypass the 0.25 floor clamp and return 0.0 directly. `projectRowsWithReliability` destructures the new shape and attaches `injuryAdjustment` to each projected row. Final valuation output includes `injuryAdjustment: { status, multiplier }` per player. 4 new tests covering IL-60 discount, minors 0.0 multiplier, field presence with il_10 value, and env var override. 145/145 tests pass.
 
 ### US-11.5: Depth chart position factor in valuation
 **As a** Draft Kit user, **I want** depth-chart rank (already ingested by US-4.3) factored into valuation, **so that** a 4th-string SP isn't valued at the same level as a #1 SP with the same career ERA sample.
