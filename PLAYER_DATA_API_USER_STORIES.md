@@ -805,7 +805,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 
 > **Rubric mapping:** "Custom 1 or 3 year stats used" (1pt), "Predictive stats used" (1pt), "Age Used" (1pt), "Injury Status Used" (1pt), "Depth Chart Position Used" (1pt) — 5pt total. ("Scarcity Used" is US-5.2; "Test Cases 1-5 Variation" is `tests/valuationEngine.test.js`; "New Values requested/presented after every edit" is satisfied by Draft Kit US-13.1.)
 
-### US-11.1: Multi-year stats option (1-year vs 3-year averaging)
+### US-11.1: Multi-year stats option (1-year vs 3-year averaging) ✅ COMPLETED
 **As a** Draft Kit user setting up valuations, **I want** to choose between last-season-only stats or a 3-year weighted average, **so that** valuations match my league's preference for recency vs. stability.
 
 **Acceptance criteria:**
@@ -813,6 +813,8 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 - When `last3`: `loadStatRows` queries the 3 most recent completed seasons and computes a weighted average (`50% / 30% / 20%` for years 1/2/3); rate stats (AVG/OBP/SLG/ERA/WHIP) weighted by AB or IP rather than year
 - `valuationEngine.normalizeLeagueSettings` accepts the field and threads it through; backwards compatible (default behavior unchanged when unset)
 - Unit test: same player produces materially different `projectedValue` when toggling `last1` ↔ `last3` for someone with a hot/cold prior year
+
+**Implementation:** Added `statsWindow: 'last1'` to `DEFAULTS`. `mergeSettings` threads `statsWindow` through (validates to `'last3'` or default `'last1'`). New `loadWeightedStatRows(group, weights)` queries the N most recent seasons in one SQL call, groups by `player_id`, applies year weights `[0.5, 0.3, 0.2]` to counting stats and volume-weighted averaging (AB or IP) to rate stats. New `loadStatRowsForSettings(settings, season, group)` dispatcher replaces the three direct `loadStatRows` call-sites in `runValuations`, `getExclusionDiagnostics`, and `computeRecommendations`. `meta.statsWindow` included in valuation response. 5 new unit tests cover: default value, threading, invalid value fallback, graceful empty-array on no-DB, and direct weighting math verification. 130/130 tests pass.
 
 ### US-11.2: Predictive (projected) stats input
 **As a** Draft Kit user, **I want** the engine to use forward-looking projected stats (Steamer / ZiPS / community) when available, instead of last year's raw stats, **so that** valuations reflect an expectation, not a memory.

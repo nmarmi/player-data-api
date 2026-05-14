@@ -51,6 +51,8 @@ const DEFAULTS = {
   minIP:  40,
   // Season to use for stats (defaults to last calendar year)
   statSeason: null,
+  // US-11.1: 'last1' = use only the most recent season (default); 'last3' = weighted 3-year average
+  statsWindow: 'last1',
   // Scoring categories
   hittingCategories:  ['hr', 'r', 'rbi', 'sb', 'avg'],
   pitchingCategories: ['w', 'k', 'sv', 'era', 'whip'],
@@ -218,6 +220,112 @@ function loadStatRows(season, group) {
     } catch (_) {}
   }
   return [];
+}
+
+/**
+ * US-11.1: Loads player stat rows weighted across the N most recent completed seasons.
+ *
+ * Weights (most-recent → oldest): [0.50, 0.30, 0.20] by default.
+ *
+ * Counting stats (HR, R, RBI, …) — straight weighted average of season totals.
+ * Rate   stats  (AVG, OBP, SLG, ERA, WHIP, K9) — volume-weighted average so
+ *   a player with 600 AB in year 1 and 10 AB in year 2 isn't distorted by
+ *   the small-sample rate.
+ *
+ * Returns the same shape as loadStatRows() so callers are interchangeable.
+ *
+ * @param {'hitting'|'pitching'} group
+ * @param {number[]} [weights=[0.5, 0.3, 0.2]]
+ * @returns {Array<object>}
+ */
+function loadWeightedStatRows(group, weights = [0.5, 0.3, 0.2]) {
+  const db = tryGetDb();
+  if (!db) return [];
+  try {
+    // Find the N most recent seasons that actually have data for this group
+    const seasonRows = db.prepare(
+      `SELECT DISTINCT season FROM player_stats WHERE stat_group = ? ORDER BY season DESC LIMIT ?`
+    ).all(group, weights.length);
+    if (!seasonRows.length) return [];
+    const seasons = seasonRows.map((r) => r.season);
+
+    // Load all rows for those seasons in one query
+    const placeholders = seasons.map(() => '?').join(',');
+    const rows = db.prepare(`
+      SELECT
+        p.player_id, p.name, p.positions, p.mlb_team, p.status, p.is_available,
+        p.depth_chart_rank, p.depth_chart_position,
+        ps.season, ps.games_played, ps.ab, ps.r, ps.h, ps.hr, ps.rbi, ps.bb,
+        ps.k, ps.sb, ps.avg, ps.obp, ps.slg, ps.ops,
+        ps.w, ps.l, ps.era, ps.whip, ps.k9, ps.ip, ps.sv, ps.hld
+      FROM players p
+      JOIN player_stats ps ON p.player_id = ps.player_id
+      WHERE ps.stat_group = ? AND ps.season IN (${placeholders})
+    `).all(group, ...seasons);
+
+    if (!rows.length) return [];
+
+    // Group rows by player, sorted newest season first
+    const byPlayer = new Map();
+    for (const row of rows) {
+      if (!byPlayer.has(row.player_id)) byPlayer.set(row.player_id, []);
+      byPlayer.get(row.player_id).push(row);
+    }
+
+    const COUNTING = ['games_played', 'ab', 'r', 'h', 'hr', 'rbi', 'bb', 'k', 'sb', 'w', 'l', 'ip', 'sv', 'hld'];
+    const RATE     = ['avg', 'obp', 'slg', 'ops', 'era', 'whip', 'k9'];
+    const RATE_VOL = { avg: 'ab', obp: 'ab', slg: 'ab', ops: 'ab', era: 'ip', whip: 'ip', k9: 'ip' };
+
+    const result = [];
+    for (const [, playerRows] of byPlayer) {
+      // Newest season first
+      playerRows.sort((a, b) => b.season - a.season);
+
+      // Start from the most-recent row for all non-stat metadata fields
+      const merged = { ...playerRows[0] };
+      delete merged.season;
+
+      // Weighted counting stats
+      for (const stat of COUNTING) {
+        let sum = 0, totalW = 0;
+        for (let i = 0; i < playerRows.length; i++) {
+          const w = weights[i] || 0;
+          if (w > 0) { sum += (playerRows[i][stat] || 0) * w; totalW += w; }
+        }
+        merged[stat] = totalW > 0 ? sum / totalW : 0;
+      }
+
+      // Volume-weighted rate stats
+      for (const stat of RATE) {
+        const volField = RATE_VOL[stat];
+        let num = 0, den = 0;
+        for (let i = 0; i < playerRows.length; i++) {
+          const w   = weights[i] || 0;
+          const vol = (playerRows[i][volField] || 0) * w;
+          if (w > 0 && vol > 0) {
+            num += (playerRows[i][stat] || 0) * vol;
+            den += vol;
+          }
+        }
+        merged[stat] = den > 0 ? num / den : 0;
+      }
+
+      result.push(merged);
+    }
+    return result;
+  } catch (_) {
+    return [];
+  }
+}
+
+/**
+ * Returns the correct stat rows based on settings.statsWindow.
+ * 'last1' → loadStatRows(season, group)
+ * 'last3' → loadWeightedStatRows(group)
+ */
+function loadStatRowsForSettings(settings, season, group) {
+  if (settings.statsWindow === 'last3') return loadWeightedStatRows(group);
+  return loadStatRows(season, group);
 }
 
 // ── Core computation ──────────────────────────────────────────────────────────
@@ -1058,6 +1166,7 @@ function mergeSettings(leagueSettings = {}) {
     minAB:               Number(leagueSettings.minAB)               || DEFAULTS.minAB,
     minIP:               Number(leagueSettings.minIP)               || DEFAULTS.minIP,
     statSeason:          Number(leagueSettings.statSeason)          || null,
+    statsWindow:         leagueSettings.statsWindow === 'last3' ? 'last3' : DEFAULTS.statsWindow,
     hittingCategories:   leagueSettings.hittingCategories  || DEFAULTS.hittingCategories,
     pitchingCategories:  leagueSettings.pitchingCategories || DEFAULTS.pitchingCategories,
     // Keep Set types — don't allow override for now (US-5.3 can extend)
@@ -1221,13 +1330,13 @@ function runValuations(leagueSettings = {}, draftState = {}) {
   // Default to last calendar year if no specific season is requested
   const season   = settings.statSeason || (new Date().getFullYear() - 1);
 
-  // STEP 1: Load all hitter and pitcher stat rows for the target season
-  const allHitters  = loadStatRows(season, 'hitting');
-  const allPitchers = loadStatRows(season, 'pitching');
+  // STEP 1: Load all hitter and pitcher stat rows for the target season (or 3-year weighted)
+  const allHitters  = loadStatRowsForSettings(settings, season, 'hitting');
+  const allPitchers = loadStatRowsForSettings(settings, season, 'pitching');
   const allPoolPlayers = loadPlayerPool();
 
   if (!allHitters.length && !allPitchers.length) {
-    return { valuations: [], meta: { season, note: 'No player stats found — run import-stats first' } };
+    return { valuations: [], meta: { season, statsWindow: settings.statsWindow, note: 'No player stats found — run import-stats first' } };
   }
 
   // If a live draft is in progress, only value players who haven't been picked yet
@@ -1305,6 +1414,7 @@ function runValuations(leagueSettings = {}, draftState = {}) {
 
   const meta = {
     season,
+    statsWindow:      settings.statsWindow,
     numTeams:         effectiveSettings.numTeams,
     budget:           effectiveSettings.budget,
     hitterSlots:      effectiveSettings.numTeams * effectiveSettings.hitterSlotsPerTeam,
@@ -1333,8 +1443,8 @@ function getExclusionDiagnostics(leagueSettings = {}, draftState = {}, opts = {}
   const season = settings.statSeason || (new Date().getFullYear() - 1);
   const targetIds = Array.isArray(opts.playerIds) ? opts.playerIds.filter(Boolean) : [];
 
-  const allHitters = loadStatRows(season, 'hitting');
-  const allPitchers = loadStatRows(season, 'pitching');
+  const allHitters = loadStatRowsForSettings(settings, season, 'hitting');
+  const allPitchers = loadStatRowsForSettings(settings, season, 'pitching');
   const allPoolPlayers = loadPlayerPool();
 
   const purchasedIds = new Set(
@@ -1397,6 +1507,7 @@ module.exports = {
   applyDraftStateOverrides,
   computeRemainingSlotsByPosition,
   loadStatRows,
+  loadWeightedStatRows,
   DEFAULTS,
   HITTER_POSITIONS_SET,
   PITCHER_POSITIONS_SET,

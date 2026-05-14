@@ -104,6 +104,44 @@ function migrate() {
     )
   `);
 
+  // US-11.2: forward-looking projection rows (Steamer / ZiPS / manual)
+  // Same column set as player_stats; PK is (player_id, season, stat_group, source).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS player_projections (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      player_id     TEXT    NOT NULL,
+      mlb_person_id INTEGER NOT NULL DEFAULT 0,
+      season        INTEGER NOT NULL,
+      stat_group    TEXT    NOT NULL,
+      source        TEXT    NOT NULL DEFAULT 'manual',
+      games_played  INTEGER NOT NULL DEFAULT 0,
+      ab            REAL    NOT NULL DEFAULT 0,
+      r             REAL    NOT NULL DEFAULT 0,
+      h             REAL    NOT NULL DEFAULT 0,
+      hr            REAL    NOT NULL DEFAULT 0,
+      rbi           REAL    NOT NULL DEFAULT 0,
+      bb            REAL    NOT NULL DEFAULT 0,
+      k             REAL    NOT NULL DEFAULT 0,
+      sb            REAL    NOT NULL DEFAULT 0,
+      avg           REAL    NOT NULL DEFAULT 0,
+      obp           REAL    NOT NULL DEFAULT 0,
+      slg           REAL    NOT NULL DEFAULT 0,
+      ops           REAL    NOT NULL DEFAULT 0,
+      w             REAL    NOT NULL DEFAULT 0,
+      l             REAL    NOT NULL DEFAULT 0,
+      era           REAL    NOT NULL DEFAULT 0,
+      whip          REAL    NOT NULL DEFAULT 0,
+      k9            REAL    NOT NULL DEFAULT 0,
+      ip            REAL    NOT NULL DEFAULT 0,
+      sv            REAL    NOT NULL DEFAULT 0,
+      hld           REAL    NOT NULL DEFAULT 0,
+      qs            REAL    NOT NULL DEFAULT 0,
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(player_id, season, stat_group, source)
+    )
+  `);
+
   // US-9.2: persisted analytics events
   db.exec(`
     CREATE TABLE IF NOT EXISTS usage_events (
