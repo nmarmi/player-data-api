@@ -94,13 +94,19 @@ const DEFAULTS = {
       minors:      0.0,
       dfa:         0.0,
     },
+    // US-11.5: multipliers per depth-chart rank. Override via VALUATION_DEPTH_CURVE env var (JSON).
+    // null (uncharted) = 0.5 — player may be a starter not yet on a depth chart.
+    // 4+ (deep bench)  = 0.4 — confirmed low on the depth chart.
     depthRankMultipliers: {
       '1': 1.0,
-      '2': 0.75,
-      '3': 0.55,
-      defaultBench: 0.4,
+      '2': 0.9,
+      '3': 0.7,
+      '4+': 0.4,
+      uncharted: 0.5,
     },
   },
+  // US-11.5: opt-out of depth-chart factor per league (true = apply, false = skip)
+  depthChartFactor: true,
 };
 
 const HITTER_POSITION_KEYS = new Set(['C', '1B', '2B', '3B', 'SS', 'OF', 'UTIL', 'DH']);
@@ -219,20 +225,44 @@ function injuryMultiplierForStatus(status, settings) {
   return { multiplier: 1.0, statusKey: normalized };
 }
 
+/**
+ * US-11.5: Returns { multiplier, depthChartAdjustment } for the player's depth-chart rank.
+ * Respects leagueSettings.depthChartFactor (default true).
+ * Configurable via VALUATION_DEPTH_CURVE env var (merged into settings by mergeSettings).
+ * @returns {{ multiplier: number, depthChartAdjustment: { rank: number|null, multiplier: number } }}
+ */
 function depthChartMultiplier(row, statGroup, settings) {
-  const cfg = settings?.availability?.depthRankMultipliers || DEFAULTS.availability.depthRankMultipliers;
-  const rank = Number(row.depth_chart_rank || row.depthChartRank || 0);
+  // Opt-out: if league disables depth-chart factor return 1.0 with no adjustment
+  if (settings?.depthChartFactor === false) {
+    return { multiplier: 1.0, depthChartAdjustment: { rank: null, multiplier: 1.0 } };
+  }
+
+  const cfg  = settings?.availability?.depthRankMultipliers || DEFAULTS.availability.depthRankMultipliers;
+  const rawRank = row.depth_chart_rank ?? row.depthChartRank ?? null;
+  const rank = rawRank !== null && rawRank !== undefined ? Number(rawRank) : null;
   const role = String(row.depth_chart_position || row.depthChartPosition || '').toUpperCase();
 
-  if (rank === 1) {
-    // Slight role-aware boosts for high leverage/locked roles.
-    if (statGroup === 'pitching' && (role.includes('CL') || role.includes('RP'))) return 1.03;
-    if (statGroup === 'hitting' && (role.includes('DH') || role.includes('UTIL'))) return 1.01;
-    return Number(cfg['1']) || 1.0;
+  let multiplier;
+  if (rank === null || rank === 0) {
+    // Uncharted player — may be a starter not yet on depth chart
+    multiplier = Number(cfg.uncharted ?? cfg.defaultBench ?? 0.5);
+  } else if (rank === 1) {
+    // Small role-aware boost for locked high-leverage roles
+    if (statGroup === 'pitching' && (role.includes('CL') || role.includes('RP'))) {
+      multiplier = Math.min(1.1, (Number(cfg['1']) || 1.0) + 0.03);
+    } else {
+      multiplier = Number(cfg['1']) || 1.0;
+    }
+  } else if (rank === 2) {
+    multiplier = Number(cfg['2']) || 0.9;
+  } else if (rank === 3) {
+    multiplier = Number(cfg['3']) || 0.7;
+  } else {
+    // rank 4 and beyond — deep bench
+    multiplier = Number(cfg['4+'] ?? cfg.defaultBench ?? 0.4);
   }
-  if (rank === 2) return Number(cfg['2']) || 0.75;
-  if (rank >= 3) return Number(cfg['3']) || 0.55;
-  return Number(cfg.defaultBench) || 0.4;
+
+  return { multiplier, depthChartAdjustment: { rank, multiplier } };
 }
 
 /**
@@ -240,16 +270,22 @@ function depthChartMultiplier(row, statGroup, settings) {
  * minors/DFA are 0.0 — they bypass the depth-chart calc and the floor clamp.
  * @returns {{ multiplier: number, injuryAdjustment: { status: string, multiplier: number } }}
  */
+/**
+ * Returns combined availability multiplier plus both adjustment breakdowns for the response.
+ * @returns {{ multiplier: number, injuryAdjustment: object, depthChartAdjustment: object }}
+ */
 function availabilityMultiplier(row, statGroup, settings) {
   const { multiplier: injuryMult, statusKey } = injuryMultiplierForStatus(row.status, settings);
   const injuryAdjustment = { status: statusKey, multiplier: injuryMult };
 
   // Players in the minors / DFA / released don't contribute this season — return 0 directly
-  if (injuryMult <= 0) return { multiplier: 0.0, injuryAdjustment };
+  if (injuryMult <= 0) {
+    return { multiplier: 0.0, injuryAdjustment, depthChartAdjustment: null };
+  }
 
-  const depthMult = depthChartMultiplier(row, statGroup, settings);
-  const combined  = Math.max(0.25, Math.min(1.1, injuryMult * depthMult));
-  return { multiplier: combined, injuryAdjustment };
+  const { multiplier: depthMult, depthChartAdjustment } = depthChartMultiplier(row, statGroup, settings);
+  const combined = Math.max(0.25, Math.min(1.1, injuryMult * depthMult));
+  return { multiplier: combined, injuryAdjustment, depthChartAdjustment };
 }
 
 // ── DB loader ─────────────────────────────────────────────────────────────────
@@ -609,7 +645,7 @@ function projectRowsWithReliability(rows, statGroup, settings) {
   return rows.map((row) => {
     const sample = Math.max(0, Number(row[volumeField]) || 0);
     const expectedVolume = sample > 0 ? sample : fallbackVolume;
-    const { multiplier: availMult, injuryAdjustment } = availabilityMultiplier(row, statGroup, settings);
+    const { multiplier: availMult, injuryAdjustment, depthChartAdjustment } = availabilityMultiplier(row, statGroup, settings);
 
     // US-11.3: age factor — only applied when leagueSettings.ageFactor === true
     const { age, multiplier: ageMult } = settings.ageFactor
@@ -649,6 +685,7 @@ function projectRowsWithReliability(rows, statGroup, settings) {
         avg: projAvg,
         availabilityMultiplier: availMult,
         injuryAdjustment,
+        depthChartAdjustment,
         ageAdjustment: { age, multiplier: ageMult },
       };
     }
@@ -681,6 +718,7 @@ function projectRowsWithReliability(rows, statGroup, settings) {
       whip: projWhip,
       availabilityMultiplier: availMult,
       injuryAdjustment,
+      depthChartAdjustment,
       ageAdjustment: { age, multiplier: ageMult },
     };
   });
@@ -829,8 +867,9 @@ function assignDollarValues(
       depthChartRank: Number(p.depth_chart_rank) || null,
       depthChartPosition: p.depth_chart_position || null,
       availabilityMultiplier: Number(p.availabilityMultiplier) || 1,
-      injuryAdjustment: p.injuryAdjustment || null,
-      ageAdjustment: p.ageAdjustment || null,
+      injuryAdjustment:     p.injuryAdjustment     || null,
+      depthChartAdjustment: p.depthChartAdjustment || null,
+      ageAdjustment:        p.ageAdjustment        || null,
       dollarValue,
       projectedValue: dollarValue,  // pre-draft: projected = dollar value
       rank:           p.rank,
@@ -1359,6 +1398,7 @@ function mergeSettings(leagueSettings = {}) {
     statsWindow:         leagueSettings.statsWindow === 'last3' ? 'last3' : DEFAULTS.statsWindow,
     ageFactor:           leagueSettings.ageFactor === true,
     ageCurve:            parseAgeCurve(leagueSettings.ageCurve),
+    depthChartFactor:    leagueSettings.depthChartFactor === false ? false : DEFAULTS.depthChartFactor,
     hittingCategories:   leagueSettings.hittingCategories  || DEFAULTS.hittingCategories,
     pitchingCategories:  leagueSettings.pitchingCategories || DEFAULTS.pitchingCategories,
     // Keep Set types — don't allow override for now (US-5.3 can extend)
@@ -1374,10 +1414,12 @@ function mergeSettings(leagueSettings = {}) {
         ...DEFAULTS.availability.injuryMultipliers,
         ...inputInjury,
       },
-      depthRankMultipliers: {
-        ...DEFAULTS.availability.depthRankMultipliers,
-        ...inputDepth,
-      },
+      depthRankMultipliers: (() => {
+        const envCurve = process.env.VALUATION_DEPTH_CURVE;
+        let envDepth = {};
+        if (envCurve) { try { envDepth = JSON.parse(envCurve); } catch (_) {} }
+        return { ...DEFAULTS.availability.depthRankMultipliers, ...envDepth, ...inputDepth };
+      })(),
     },
   };
 }

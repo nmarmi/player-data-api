@@ -851,7 +851,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 
 **Implementation:** Updated DEFAULTS to match AC values (il_10: 0.95, il_15: 0.93, il_60: 0.6, dtd: 0.97, minors: 0.0, dfa: 0.0). `resolveInjuryMap` reads `VALUATION_INJURY_DISCOUNTS` env var (JSON) merged over defaults. `injuryMultiplierForStatus` now returns `{ multiplier, statusKey }` with full alias handling for all IL variants. `availabilityMultiplier` returns `{ multiplier, injuryAdjustment }` — minors/DFA bypass the 0.25 floor clamp and return 0.0 directly. `projectRowsWithReliability` destructures the new shape and attaches `injuryAdjustment` to each projected row. Final valuation output includes `injuryAdjustment: { status, multiplier }` per player. 4 new tests covering IL-60 discount, minors 0.0 multiplier, field presence with il_10 value, and env var override. 145/145 tests pass.
 
-### US-11.5: Depth chart position factor in valuation
+### US-11.5: Depth chart position factor in valuation ✅ COMPLETED
 **As a** Draft Kit user, **I want** depth-chart rank (already ingested by US-4.3) factored into valuation, **so that** a 4th-string SP isn't valued at the same level as a #1 SP with the same career ERA sample.
 
 **Acceptance criteria:**
@@ -859,6 +859,8 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 - Engine output includes `depthChartAdjustment: { rank, multiplier }` per player
 - Configurable via env `VALUATION_DEPTH_CURVE`; opt-out via `leagueSettings.depthChartFactor: boolean` (default `true`)
 - Test: same player evaluated with rank 1 vs rank 4 produces values in the documented ratio
+
+**Implementation:** Updated `depthRankMultipliers` DEFAULTS to match AC (`'1':1.0, '2':0.9, '3':0.7, '4+':0.4, uncharted:0.5`). Added `depthChartFactor: true` to DEFAULTS; `mergeSettings` threads it through. `VALUATION_DEPTH_CURVE` env var (JSON) merged into depth rank map at settings-merge time. `depthChartMultiplier` reworked to return `{ multiplier, depthChartAdjustment: { rank, multiplier } }` — handles null rank as `uncharted`, rank 4+ maps to `cfg['4+']`, opt-out returns `{ multiplier: 1.0, depthChartAdjustment: { rank: null, multiplier: 1.0 } }`. `availabilityMultiplier` now returns `{ multiplier, injuryAdjustment, depthChartAdjustment }`. Both fields threaded through `projectRowsWithReliability` and into the final valuation output. 5 new tests: rank-1 > rank-4, field shape, uncharted multiplier, opt-out equality, env override. 150/150 tests pass.
 
 ---
 

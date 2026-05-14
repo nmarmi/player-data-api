@@ -642,3 +642,88 @@ describe('US-11.4 injury status in valuation', () => {
     process.env.VALUATION_INJURY_DISCOUNTS = orig || '';
   });
 });
+
+describe('US-11.5 depth chart position factor in valuation', () => {
+  const settings = mergeSettings({ numTeams: 10, budget: 260, minAB: 0, minIP: 0 });
+
+  function makePool(players) {
+    return players.map((p) => ({
+      playerId: p.player_id, name: p.name,
+      mlbTeam: p.mlb_team, positions: JSON.parse(p.positions),
+    }));
+  }
+
+  test('rank 1 player valued higher than rank 4 player with identical stats', () => {
+    const opponents = Array.from({ length: 88 }, (_, i) =>
+      makeHitter({ player_id: `mlb-opp-${i}`, hr: 18, rbi: 70, avg: 0.260, depth_chart_rank: 2 })
+    );
+    const rank1 = makeHitter({ player_id: 'mlb-rank1', name: 'Starter',    hr: 25, rbi: 90, avg: 0.280, depth_chart_rank: 1 });
+    const rank4 = makeHitter({ player_id: 'mlb-rank4', name: 'Deep Bench', hr: 25, rbi: 90, avg: 0.280, depth_chart_rank: 4 });
+    const all = [rank1, rank4, ...opponents];
+    const pool = makePool(all);
+
+    const vals = computeValuations(all, [], pool, settings);
+    const v1 = vals.find((v) => v.playerId === 'mlb-rank1');
+    const v4 = vals.find((v) => v.playerId === 'mlb-rank4');
+
+    expect(v1.dollarValue).toBeGreaterThan(v4.dollarValue);
+  });
+
+  test('depthChartAdjustment field is present with rank and multiplier', () => {
+    const player = makeHitter({ player_id: 'mlb-dc-test', depth_chart_rank: 2 });
+    const rest   = Array.from({ length: 9 }, (_, i) => makeHitter({ player_id: `mlb-r-${i}` }));
+    const all    = [player, ...rest];
+    const vals   = computeValuations(all, [], makePool(all), settings);
+    const v = vals.find((v) => v.playerId === 'mlb-dc-test');
+
+    expect(v).toBeTruthy();
+    expect(v.depthChartAdjustment).not.toBeNull();
+    expect(v.depthChartAdjustment.rank).toBe(2);
+    expect(v.depthChartAdjustment.multiplier).toBeCloseTo(0.9, 2); // rank 2 = 0.9
+  });
+
+  test('uncharted player (null rank) uses uncharted multiplier (0.5)', () => {
+    const player = makeHitter({ player_id: 'mlb-unc-test', depth_chart_rank: null });
+    const rest   = Array.from({ length: 9 }, (_, i) => makeHitter({ player_id: `mlb-r-${i}`, depth_chart_rank: 1 }));
+    const all    = [player, ...rest];
+    const vals   = computeValuations(all, [], makePool(all), settings);
+    const v = vals.find((v) => v.playerId === 'mlb-unc-test');
+
+    expect(v.depthChartAdjustment.rank).toBeNull();
+    expect(v.depthChartAdjustment.multiplier).toBeCloseTo(0.5, 2);
+  });
+
+  test('depthChartFactor: false — rank 1 and rank 4 players receive same depth multiplier', () => {
+    const noDepthSettings = mergeSettings({ depthChartFactor: false, minAB: 0, minIP: 0 });
+    const rank1 = makeHitter({ player_id: 'mlb-r1', hr: 25, rbi: 90, avg: 0.280, depth_chart_rank: 1, status: 'active' });
+    const rank4 = makeHitter({ player_id: 'mlb-r4', hr: 25, rbi: 90, avg: 0.280, depth_chart_rank: 4, status: 'active' });
+    const all   = [rank1, rank4];
+    const pool  = makePool(all);
+
+    const vals = computeValuations(all, [], pool, noDepthSettings);
+    const v1 = vals.find((v) => v.playerId === 'mlb-r1');
+    const v4 = vals.find((v) => v.playerId === 'mlb-r4');
+
+    // Both get depthChartAdjustment.multiplier = 1.0 when factor is disabled
+    expect(v1.depthChartAdjustment.multiplier).toBe(1.0);
+    expect(v4.depthChartAdjustment.multiplier).toBe(1.0);
+    expect(v1.dollarValue).toBeCloseTo(v4.dollarValue, 0);
+  });
+
+  test('VALUATION_DEPTH_CURVE env var overrides depth multipliers', () => {
+    const orig = process.env.VALUATION_DEPTH_CURVE;
+    process.env.VALUATION_DEPTH_CURVE = JSON.stringify({ '2': 0.5 });
+
+    // Re-merge settings so the env var is picked up
+    const envSettings = mergeSettings({ minAB: 0 });
+    const player = makeHitter({ player_id: 'mlb-env-depth', depth_chart_rank: 2 });
+    const rest   = Array.from({ length: 9 }, (_, i) => makeHitter({ player_id: `mlb-r-${i}` }));
+    const all    = [player, ...rest];
+    const vals   = computeValuations(all, [], makePool(all), envSettings);
+    const v = vals.find((v) => v.playerId === 'mlb-env-depth');
+
+    expect(v.depthChartAdjustment.multiplier).toBeCloseTo(0.5, 2);
+
+    process.env.VALUATION_DEPTH_CURVE = orig || '';
+  });
+});
