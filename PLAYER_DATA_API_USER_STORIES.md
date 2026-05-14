@@ -1,5 +1,24 @@
 # DraftIQ — Player Data API User Stories & Execution Plan
 
+## Implementation Status
+
+**53 / 61 stories complete** (87%). Stories that are implemented in the codebase are marked `✅ COMPLETED` on their heading line.
+
+| Epic | Status | Notes |
+|---|---|---|
+| Epic 1 — Player identity & seed data | ✅ Done | Standard `mlb-{id}` shape, PlayerStub model, rich seed |
+| Epic 2 — Endpoints & versioning | ✅ Done | All 9 stories; `/api/v1/*` canonical, legacy aliases sunset 2026-12-31 |
+| Epic 3 — Database integration | ✅ Done | better-sqlite3, players + player_stats tables, sync log |
+| Epic 4 — MLB Stats API ingestion | ✅ Done | All 5 sources + scheduler + freshness meta |
+| Epic 5 — Valuation engine | ✅ Done | z-score above replacement, scarcity, league/draft-state aware |
+| Epic 6 — Recommendations | ✅ Done | Best-available, positional need, nominations, budget strategy |
+| Epic 7 — Test suite | ✅ Done | Jest + Supertest; 125 passing tests |
+| Epic 8 — Cross-cutting concerns | ✅ Done | Env config, structured logs, OpenAPI spec, health, key rotation |
+| Epic 9 — Product realignment | ✅ Done | Demo UI relocated, `/analytics/usage` persisted, README rewritten |
+| Epic 10 — Developer accounts & licensing UI | ✅ Done | Account model, portal, key generation, audit, IP whitelisting |
+| Epic 11 — Predictive valuation inputs | ⏳ Pending | Multi-year, projections, age, injury, depth-chart factors |
+| Epic 13 — Push notifications | ⏳ Pending | Event detection, SSE/webhook delivery, force-trigger |
+
 ## Product Vision
 
 The Player Data API is the **data backbone** for a fantasy baseball auction draft assistant. It owns player identity data, seed datasets, external MLB data ingestion, valuations, and recommendations. The Draft Kit repo consumes this API.
@@ -100,7 +119,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ## Epic 1: Data Model & ID Standardization (Milestone 1)
 
-### US-1.1: Adopt standard player ID format
+### US-1.1: Adopt standard player ID format ✅ COMPLETED
 **As a** developer integrating the Draft Kit with the Player Data API, **I want** all player records to use the `mlb-{mlbPersonId}` ID format, **so that** player identity is consistent across both repos.
 
 **Acceptance criteria:**
@@ -111,7 +130,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-1.2: Adopt standard MLB team ID format
+### US-1.2: Adopt standard MLB team ID format ✅ COMPLETED
 **As a** developer, **I want** MLB team references to use the `mlb-{mlbTeamId}` format, **so that** team identity is unambiguous and separate from fantasy team identity.
 
 **Acceptance criteria:**
@@ -123,7 +142,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-1.3: Align player data shape to PlayerStub model
+### US-1.3: Align player data shape to PlayerStub model ✅ COMPLETED
 **As a** Draft Kit consumer, **I want** the API to return players matching the `PlayerStub` schema, **so that** the Draft Kit can load a player pool without transformation.
 
 **Acceptance criteria:**
@@ -135,7 +154,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-1.4: Create a rich seed dataset
+### US-1.4: Create a rich seed dataset ✅ COMPLETED
 **As a** Draft Kit developer working before API integration is complete, **I want** a local seed dataset of 300+ realistic player stubs, **so that** the Draft Kit can function with a full-sized player pool.
 
 **Acceptance criteria:**
@@ -147,7 +166,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (1,694 player records seeded; verified via boot log: "Players table already has 1694 rows".)
 
-### US-1.5: Update CSV import script to produce new schema
+### US-1.5: Update CSV import script to produce new schema ✅ COMPLETED
 **As a** developer, **I want** the CSV import script to produce `players.json` in the new `PlayerStub`-compatible format, **so that** imported data immediately works with the updated API.
 
 **Acceptance criteria:**
@@ -162,7 +181,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ## Epic 2: API Contract for Draft Kit Integration (Milestone 1 & 3)
 
-### US-2.1: Player pool export endpoint
+### US-2.1: Player pool export endpoint ✅ COMPLETED
 **As a** Draft Kit, **I want** a single endpoint that returns the entire eligible player pool, **so that** I can load all available players into a draft session.
 
 **Acceptance criteria:**
@@ -173,7 +192,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-2.2: Single player lookup endpoint
+### US-2.2: Single player lookup endpoint ✅ COMPLETED
 **As a** Draft Kit, **I want** to look up a single player by ID, **so that** I can fetch details for a specific player during the draft.
 
 **Acceptance criteria:**
@@ -183,7 +202,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-2.3: Player search endpoint (refine existing)
+### US-2.3: Player search endpoint (refine existing) ✅ COMPLETED
 **As a** Draft Kit user, **I want** to search players by name, team, or position, **so that** I can quickly find who I'm looking for during a live draft.
 
 **Acceptance criteria:**
@@ -195,7 +214,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-2.4: Player valuation endpoint (placeholder)
+### US-2.4: Player valuation endpoint (placeholder) ✅ COMPLETED
 **As a** Draft Kit, **I want** to request dollar valuations for players given the current draft state, **so that** I can display recommended bid amounts.
 
 **Acceptance criteria:**
@@ -207,7 +226,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-2.5: Player recommendation endpoint (placeholder)
+### US-2.5: Player recommendation endpoint (placeholder) ✅ COMPLETED
 **As a** Draft Kit, **I want** to request draft recommendations based on current draft state, **so that** I can see value picks and nomination suggestions.
 
 **Acceptance criteria:**
@@ -218,7 +237,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-2.6: API versioning strategy
+### US-2.6: API versioning strategy ✅ COMPLETED
 **As a** developer, **I want** the API to support versioning from the start, **so that** breaking changes don't silently break the Draft Kit.
 
 **Acceptance criteria:**
@@ -228,7 +247,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-2.7: Standardize API error responses
+### US-2.7: Standardize API error responses ✅ COMPLETED
 **As a** Draft Kit developer, **I want** consistent error response shapes across all endpoints, **so that** error handling in the client is predictable.
 
 **Acceptance criteria:**
@@ -238,7 +257,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-2.8: Deprecate legacy unversioned routes
+### US-2.8: Deprecate legacy unversioned routes ✅ COMPLETED
 **As a** Draft Kit developer, **I want** a clear deprecation path for the unversioned `/players`, `/usage`, `/health`, `/license`, `/admin` routes, **so that** the client can migrate to `/api/v1/*` without surprise breakage.
 
 **Acceptance criteria:**
@@ -252,7 +271,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-2.9: Fix recommendations controller to use the real valuation engine
+### US-2.9: Fix recommendations controller to use the real valuation engine ✅ COMPLETED
 **As a** developer, **I want** `POST /players/recommendations` to delegate to `runValuations` from `services/valuationEngine`, **so that** the endpoint doesn't throw at runtime and its output is consistent with `POST /players/valuations`.
 
 **Acceptance criteria:**
@@ -267,7 +286,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ## Epic 3: Database & Persistence Layer (Milestone 2)
 
-### US-3.1: Choose and integrate a database
+### US-3.1: Choose and integrate a database ✅ COMPLETED
 **As a** developer, **I want** player data stored in a database rather than flat JSON files, **so that** data can be updated without redeploying.
 
 **Acceptance criteria:**
@@ -278,7 +297,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-3.2: Player table schema
+### US-3.2: Player table schema ✅ COMPLETED
 **As a** developer, **I want** a `players` table matching the `PlayerStub` + stats model.
 
 **Acceptance criteria:**
@@ -289,7 +308,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-3.3: Refactor playersService to use database
+### US-3.3: Refactor playersService to use database ✅ COMPLETED
 **As a** developer, **I want** the players service to query the database instead of loading a JSON file.
 
 **Acceptance criteria:**
@@ -300,7 +319,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-3.4: Data ingestion table for tracking sync state
+### US-3.4: Data ingestion table for tracking sync state ✅ COMPLETED
 **As a** developer, **I want** a table that tracks when each data source was last synced, **so that** the refresh policy can be implemented correctly.
 
 **Acceptance criteria:**
@@ -319,7 +338,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 > The previously used balldontlie API (which gated injuries, depth charts, and
 > transactions behind paid tiers) is replaced entirely.
 
-### US-4.1: Player metadata ingestion from MLB Stats API
+### US-4.1: Player metadata ingestion from MLB Stats API ✅ COMPLETED
 **As a** system, **I want** to sync player identity data from the free MLB Stats API, **so that** the player pool is accurate, complete, and costs nothing to maintain.
 
 **Acceptance criteria:**
@@ -333,7 +352,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (jobs/ingestPlayerMetadata.js; verified live: 30 teams iterated, populates `mlb_team_id` from `team.id`.)
 
-### US-4.2: Injury status ingestion via roster hydration
+### US-4.2: Injury status ingestion via roster hydration ✅ COMPLETED
 **As a** Draft Kit user, **I want** current injury information reflected in the player pool, **sourced from the free MLB Stats API**.
 
 **Acceptance criteria:**
@@ -346,7 +365,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (jobs/ingestInjuries.js + scheduler runs every 30 min in active hours.)
 
-### US-4.3: Depth chart ingestion from MLB Stats API
+### US-4.3: Depth chart ingestion from MLB Stats API ✅ COMPLETED
 **As a** Draft Kit user, **I want** depth chart context available for players, **so that** I can assess playing time before bidding.
 
 **Acceptance criteria:**
@@ -359,7 +378,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (jobs/ingestDepthCharts.js populates `depth_chart_rank` and `depth_chart_position`; scheduler runs every 6h.)
 
-### US-4.4: Transaction/roster status ingestion from MLB Stats API
+### US-4.4: Transaction/roster status ingestion from MLB Stats API ✅ COMPLETED
 **As a** Draft Kit user, **I want** recent transactions (call-ups, send-downs, DFA, trades) reflected in the player pool.
 
 **Acceptance criteria:**
@@ -372,7 +391,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (jobs/ingestTransactions.js + `transactions` table; scheduler runs every 6h.)
 
-### US-4.5: Manual refresh trigger endpoint
+### US-4.5: Manual refresh trigger endpoint ✅ COMPLETED
 **As a** Draft Kit user, **I want** to trigger a data refresh on demand.
 
 **Acceptance criteria:**
@@ -384,7 +403,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (`POST /api/v1/admin/refresh` with optional `source` param; gated by `requireAdmin` middleware.)
 
-### US-4.6: Scheduled ingestion jobs
+### US-4.6: Scheduled ingestion jobs ✅ COMPLETED
 **As a** system, **I want** data syncs to run on a schedule without manual intervention.
 
 **Acceptance criteria:**
@@ -397,7 +416,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (jobs/scheduler.js — daily for metadata, 6h for depth/txns, 30m for injuries during active hours; runs boot-time staleness check.)
 
-### US-4.7: Data freshness indicators in API responses
+### US-4.7: Data freshness indicators in API responses ✅ COMPLETED
 **As a** Draft Kit developer, **I want** API responses to include data freshness metadata.
 
 **Acceptance criteria:**
@@ -407,7 +426,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (controllers attach `dataAsOf` and `staleWarnings` from `syncLog.getDataFreshnessMeta()`; verified live: detail response includes warnings for `depth_charts`, `injuries`, `transactions` when sync log is older than threshold.)
 
-### US-4.8: Season stats ingestion for valuation baseline
+### US-4.8: Season stats ingestion for valuation baseline ✅ COMPLETED
 **As a** valuation engine (Epic 5), **I want** historical season stats available per player, **so that** dollar-value projections have real data to work from.
 
 **Acceptance criteria:**
@@ -426,7 +445,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 > This must be the project's **own model**, not outsourced to a third party (required by Activity 7).
 
-### US-5.1: Baseline dollar-value projection model
+### US-5.1: Baseline dollar-value projection model ✅ COMPLETED
 **As a** Draft Kit user, **I want** each player to have a projected auction dollar value.
 
 **Acceptance criteria:**
@@ -438,7 +457,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-5.2: Positional scarcity adjustment
+### US-5.2: Positional scarcity adjustment ✅ COMPLETED
 **As a** Draft Kit user, **I want** valuations to account for positional scarcity.
 
 **Acceptance criteria:**
@@ -452,7 +471,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-5.3: League-settings-aware valuations
+### US-5.3: League-settings-aware valuations ✅ COMPLETED
 **As a** Draft Kit user with custom league settings, **I want** valuations to adjust to my specific league format.
 
 **Acceptance criteria:**
@@ -475,7 +494,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-5.4: Draft-state-aware dynamic re-valuation
+### US-5.4: Draft-state-aware dynamic re-valuation ✅ COMPLETED
 **As a** Draft Kit user mid-draft, **I want** remaining player values to update based on what has already been purchased.
 
 **Acceptance criteria:**
@@ -508,7 +527,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-5.5: Value comparison view data
+### US-5.5: Value comparison view data ✅ COMPLETED
 **As a** Draft Kit user, **I want** to see each player's projected value alongside their purchase price.
 
 **Acceptance criteria:**
@@ -526,7 +545,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 > All endpoints in this epic accept the same `{ leagueSettings, draftState, teamId? }` contract defined in US-5.3 and US-5.4. `teamId` format is `fantasy-team-{n}` as minted by the Draft Kit. Each endpoint includes a tier classification (`buy` / `fair` / `avoid`) and any threshold metadata in the response so the Draft Kit can render without duplicating logic.
 
-### US-6.1: Best available player recommendations
+### US-6.1: Best available player recommendations ✅ COMPLETED
 **As a** Draft Kit user, **I want** a ranked list of the best remaining players by value.
 
 **Acceptance criteria:**
@@ -537,7 +556,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-6.2: Positional need recommendations
+### US-6.2: Positional need recommendations ✅ COMPLETED
 **As a** Draft Kit user, **I want** recommendations that consider which roster slots I still need to fill.
 
 **Acceptance criteria:**
@@ -550,7 +569,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-6.3: Nomination suggestions
+### US-6.3: Nomination suggestions ✅ COMPLETED
 **As a** Draft Kit user, **I want** suggestions for which players to nominate (put up for auction).
 
 **Acceptance criteria:**
@@ -562,7 +581,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED**
 
-### US-6.4: Budget strategy recommendations
+### US-6.4: Budget strategy recommendations ✅ COMPLETED
 **As a** Draft Kit user, **I want** guidance on how to allocate my remaining budget.
 
 **Acceptance criteria:**
@@ -578,7 +597,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ## Epic 7: Testing & Quality (Milestone 2+)
 
-### US-7.1: Set up test framework
+### US-7.1: Set up test framework ✅ COMPLETED
 **Acceptance criteria:**
 - Test runner installed (e.g., Jest or Vitest)
 - `npm test` script added to `package.json`
@@ -586,7 +605,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (Jest + supertest; `npm test` runs 85 tests across `tests/smoke.test.js`, `playersService.test.js`, `valuationEngine.test.js`, `api.integration.test.js`.)
 
-### US-7.2: Unit tests for playersService
+### US-7.2: Unit tests for playersService ✅ COMPLETED
 **Acceptance criteria:**
 - Tests cover: search matching, team filtering, position filtering, numeric range filtering
 - Tests cover: sort by each sortable field, sort order (asc/desc)
@@ -595,7 +614,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (`tests/playersService.test.js` covers all four bullets.)
 
-### US-7.3: Unit tests for valuation engine
+### US-7.3: Unit tests for valuation engine ✅ COMPLETED
 **Acceptance criteria:**
 - Tests verify values sum to approximately total league salary pool
 - Tests verify positional scarcity adjustments change values correctly
@@ -607,7 +626,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (`tests/valuationEngine.test.js` — 7 tests covering all six acceptance criteria.)
 
-### US-7.4: Integration tests for API endpoints
+### US-7.4: Integration tests for API endpoints ✅ COMPLETED
 **Acceptance criteria:**
 - Tests cover all endpoints: `/players`, `/players/:id`, `/players/pool`, `/players/valuations`, `/players/recommendations`, `/players/recommendations/nominations`
 - Tests verify response shapes match documented contracts (US-5.3, US-5.4, US-6.1–6.4)
@@ -617,7 +636,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (`tests/api.integration.test.js` — covers all six endpoints + auth + error fields + deprecation headers.)
 
-### US-7.5: State transition tests for draft-aware endpoints
+### US-7.5: State transition tests for draft-aware endpoints ✅ COMPLETED
 **Acceptance criteria:**
 - Test sends sequential valuation requests with increasingly filled draft states
 - Verifies purchased players appear in the response with `purchasePrice` set (per US-5.5) so the Draft Kit can render value-vs-paid in one call, while remaining-pool calibration excludes them
@@ -630,7 +649,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ## Epic 8: Operational Readiness (Milestone 2+)
 
-### US-8.1: Environment-based configuration for all settings
+### US-8.1: Environment-based configuration for all settings ✅ COMPLETED
 **Acceptance criteria:**
 - Database connection, API keys, refresh intervals, CORS origin are all env-configured
 - `.env.example` documents every variable with defaults
@@ -638,7 +657,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (`.env.example` documents 14 vars across server, auth, CORS, database, legacy-API deprecation, scheduler, and logging; `src/index.js#logActiveConfig` emits the full config as a single structured `info` event on boot — secrets are reported only as counts (e.g. `apiKeysConfigured: 1`, `adminKeyConfigured: false`).)
 
-### US-8.2: Structured logging
+### US-8.2: Structured logging ✅ COMPLETED
 **Acceptance criteria:**
 - Replace `console.log` with a structured logger (e.g., pino or winston)
 - Log entries include: timestamp, level, message, context
@@ -646,7 +665,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (zero-dep `src/logger.js` emits one JSON line per call with `time` (ISO 8601), `level`, `msg`, plus context; supports `child()` for bound context, `LOG_LEVEL` filtering, `LOG_PRETTY=true` for dev-readable output. Migrated boot path, `app.js`, db layer, all five ingestion jobs, scheduler, admin/valuations/recommendations/usage controllers. Per-job summary in `scheduler.safeRun` emits `{ source, durationMs, recordCount, error?, ... }` matching the US-8.2 spec line. Contract verified by `tests/logger.test.js` (5 tests).)
 
-### US-8.3: API documentation (OpenAPI/Swagger)
+### US-8.3: API documentation (OpenAPI/Swagger) ✅ COMPLETED
 **Acceptance criteria:**
 - OpenAPI 3.x spec at `docs/openapi.yaml` (checked into the repo, not generated at runtime only)
 - Spec covers all `/api/v1/*` endpoints, request/response schemas, auth requirements (`X-API-Key`)
@@ -657,7 +676,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (`docs/openapi.yaml` documents 12 paths under `/api/v1/*` with full request/response schemas + `ApiKey`/`BearerAuth` security schemes; named `LeagueSettings`, `DraftState`, `PlayerStub`, `Valuation`, `Recommendation`, `Health`, `Error` components are referenced by `$ref`. Draft Kit's [`docs/PLAYER-DATA-API.md`](../../416-Minimum-Viable-Product/docs/PLAYER-DATA-API.md) links to it as the canonical contract. `tests/openapi.test.js` boots the app and asserts every documented path responds (no `Route not found` 404s) — runs in 0.3s.)
 
-### US-8.4: Health check improvements
+### US-8.4: Health check improvements ✅ COMPLETED
 **Acceptance criteria:**
 - `GET /health` returns `{ status, database, dataFreshness, uptime }`
 - `database` reports connected/disconnected
@@ -666,7 +685,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ** COMPLETED** (`src/controllers/healthController.js` returns `{ success, status: ok|degraded, service, database: { connected, error? }, dataFreshness: { source → { lastSyncAt, status, isStale } }, uptimeSeconds }`. Cheap `SELECT 1` round-trip confirms the DB connection. Returns `200` healthy, `503` degraded. Exempt from license auth (mounted before `requireLicense` in `src/app.js`) so external uptime checkers can probe it. Verified by an integration test plus the live boot run.)
 
-### US-8.5: API key auth contract for cross-repo callers
+### US-8.5: API key auth contract for cross-repo callers ✅ COMPLETED
 **As a** Player Data API operator, **I want** a documented, testable API key handshake for the Draft Kit to authenticate, **so that** the secret rotation story is clear and unauthorized callers are rejected predictably.
 
 **Acceptance criteria:**
@@ -684,7 +703,7 @@ All other categories — **Draft Kit Accounts**, **Draft Kit Prep**, **Draft Day
 
 ## Epic 9: Cleanup & De-emphasis (Milestone 1)
 
-### US-9.1: Remove or relocate demo UI
+### US-9.1: Remove or relocate demo UI ✅ COMPLETED
 **Acceptance criteria:**
 - `public/demo.html`, `public/app.jsx`, `public/styles.css` are removed or moved to `/examples`
 - The root `/` route returns API info JSON instead of serving HTML
