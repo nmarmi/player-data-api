@@ -828,7 +828,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 
 **Implementation:** `src/db/migrate.js` adds `player_projections` table (same columns as `player_stats` + `source` column; `UNIQUE(player_id, season, stat_group, source)`). `scripts/import-projections.js` — new CLI script: parses CSV with case-insensitive alias-aware column lookup, classifies hitters vs pitchers by IP, resolves player IDs from `players` table by MLB person ID then name fallback, upserts into `player_projections`. Added `"import-projections"` npm script. `loadProjectionRows(season, group, source)` queries `player_projections` joined to `players`. `loadStatRowsForSettings` updated to check projections first (upcoming season, `VALUATION_PROJECTION_SOURCE`), fall back to historical stats; now returns `{ rows, usedProjectionSource }`. All three call-sites (`runValuations`, `getExclusionDiagnostics`, `computeRecommendations`) updated. `meta.usedProjectionSource` added to valuation response. 5 new unit tests. 135/135 tests pass.
 
-### US-11.3: Age factor in valuation
+### US-11.3: Age factor in valuation ✅ COMPLETED
 **As a** Draft Kit user in a dynasty league, **I want** age folded into valuations (a 30-year-old's $40 is worth less than a 22-year-old's $40 over a 3-year contract), **so that** my long-term roster strategy is reflected in the auction price.
 
 **Acceptance criteria:**
@@ -837,6 +837,8 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 - Multiplier shape configurable via `VALUATION_AGE_CURVE` env var (JSON map) for league-by-league tuning
 - Disabled by default in single-year leagues (controlled by `leagueSettings.ageFactor: boolean`, default `false`)
 - Test: identical projections with ages 24 vs 36 produce differing `projectedValue` when `ageFactor: true`
+
+**Implementation:** `birth_date TEXT` column added to `players` table via idempotent `ALTER TABLE`. `ingestPlayerMetadata.js` populates `birth_date` from `person.birthDate`; upsert uses `COALESCE(excluded.birth_date, players.birth_date)` so existing values are preserved when the API returns null. All three stat-loading queries (`loadStatRows`, `loadWeightedStatRows`, `loadProjectionRows`) now select `p.birth_date`. Engine: `ageFactor: false` in DEFAULTS; `ageCurve` anchor map; `parseAgeCurve` reads `VALUATION_AGE_CURVE` env or `leagueSettings.ageCurve`; `computeAgeMultiplier(birthDate, season, curve)` computes age at April 1 of the season and linearly interpolates between anchor points; `combinedMult = availMult * ageMult` applied to all projected counting stats; `ageAdjustment: { age, multiplier }` included per player in output. 6 new unit tests. 141/141 tests pass.
 
 ### US-11.4: Injury status in valuation
 **As a** Draft Kit user, **I want** the `IL-60` / `IL-10` / `DTD` flags ingested by Epic 4 to discount valuations proportionally, **so that** a season-ending IL stay isn't priced as if the player is healthy.

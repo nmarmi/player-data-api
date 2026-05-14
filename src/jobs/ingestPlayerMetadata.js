@@ -149,6 +149,8 @@ function toPlayerRow(entry, teamAbbr, teamId) {
     mlb_team_id:   `mlb-${teamId}`,
     status,
     is_available:  status === 'active' || status === 'DTD' ? 1 : 0,
+    // US-11.3: store birth date for age-factor valuation (format: "YYYY-MM-DD")
+    birth_date:    person.birthDate || null,
   };
 }
 
@@ -201,11 +203,11 @@ function upsertPlayers(rows) {
     INSERT INTO players (
       player_id, mlb_person_id, name, player_name,
       positions, position, mlb_team, mlb_team_id,
-      status, is_available, updated_at
+      status, is_available, birth_date, updated_at
     ) VALUES (
       @player_id, @mlb_person_id, @name, @player_name,
       @positions, @position, @mlb_team, @mlb_team_id,
-      @status, @is_available, datetime('now')
+      @status, @is_available, @birth_date, datetime('now')
     )
     ON CONFLICT(player_id) DO UPDATE SET
       name         = excluded.name,
@@ -216,6 +218,7 @@ function upsertPlayers(rows) {
       mlb_team_id  = excluded.mlb_team_id,
       status       = excluded.status,
       is_available = excluded.is_available,
+      birth_date   = COALESCE(excluded.birth_date, players.birth_date),
       updated_at   = datetime('now')
   `);
 

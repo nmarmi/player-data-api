@@ -495,3 +495,72 @@ describe('US-11.2 projection source — prefer player_projections over player_st
     process.env.VALUATION_PROJECTION_SOURCE = original || '';
   });
 });
+
+describe('US-11.3 age factor in valuation', () => {
+  const { DEFAULTS } = require('../src/services/valuationEngine');
+
+  test('ageFactor defaults to false', () => {
+    expect(DEFAULTS.ageFactor).toBe(false);
+    expect(mergeSettings({}).ageFactor).toBe(false);
+  });
+
+  test('mergeSettings threads ageFactor: true', () => {
+    expect(mergeSettings({ ageFactor: true }).ageFactor).toBe(true);
+  });
+
+  test('ageFactor: false — identical players at ages 24 and 36 receive the same dollarValue', () => {
+    const young = makeHitter({ player_id: 'mlb-age-young', name: 'Young Player', birth_date: '2001-04-01' });
+    const old   = makeHitter({ player_id: 'mlb-age-old',   name: 'Old Player',   birth_date: '1989-04-01' });
+    const rest  = Array.from({ length: 88 }, (_, i) => makeHitter({ player_id: `mlb-rest-${i}` }));
+
+    const vals = computeValuations([young, old, ...rest], [], [], mergeSettings({ ageFactor: false }));
+    const youngVal = vals.find((v) => v.playerId === 'mlb-age-young')?.dollarValue ?? -1;
+    const oldVal   = vals.find((v) => v.playerId === 'mlb-age-old')?.dollarValue ?? -1;
+
+    // Without ageFactor both players have equal stats → equal values
+    expect(youngVal).toBeGreaterThan(0);
+    expect(youngVal).toBeCloseTo(oldVal, 0);
+  });
+
+  test('ageFactor: true — age 24 player worth more than age 36 player with identical projections', () => {
+    // Season 2025: age-24 born 2001-04-01, age-36 born 1989-04-01
+    const season = 2025;
+    const young = makeHitter({ player_id: 'mlb-age-young', name: 'Young Player', birth_date: '2001-04-01', hr: 25, rbi: 90, avg: 0.280 });
+    const old   = makeHitter({ player_id: 'mlb-age-old',   name: 'Old Player',   birth_date: '1989-04-01', hr: 25, rbi: 90, avg: 0.280 });
+    const rest  = Array.from({ length: 88 }, (_, i) =>
+      makeHitter({ player_id: `mlb-rest-${i}`, hr: 18, rbi: 70, avg: 0.260 })
+    );
+
+    const settings = mergeSettings({ ageFactor: true, statSeason: season });
+    const vals = computeValuations([young, old, ...rest], [], [], settings);
+
+    const youngVal = vals.find((v) => v.playerId === 'mlb-age-young')?.dollarValue ?? -1;
+    const oldVal   = vals.find((v) => v.playerId === 'mlb-age-old')?.dollarValue ?? -1;
+
+    // Young player (24) should be worth more than the older player (36)
+    expect(youngVal).toBeGreaterThan(oldVal);
+  });
+
+  test('ageAdjustment field is present in valuation output', () => {
+    const player = makeHitter({ player_id: 'mlb-age-test', birth_date: '1995-06-15' });
+    const rest   = Array.from({ length: 9 }, (_, i) => makeHitter({ player_id: `mlb-r-${i}` }));
+    const vals   = computeValuations([player, ...rest], [], [], mergeSettings({ ageFactor: true, statSeason: 2025 }));
+    const v = vals.find((v) => v.playerId === 'mlb-age-test');
+
+    expect(v).toBeTruthy();
+    expect(v.ageAdjustment).not.toBeNull();
+    expect(v.ageAdjustment).toHaveProperty('age');
+    expect(v.ageAdjustment).toHaveProperty('multiplier');
+    expect(typeof v.ageAdjustment.age).toBe('number');
+  });
+
+  test('ageAdjustment is null when ageFactor is false (default)', () => {
+    const player = makeHitter({ player_id: 'mlb-age-nofactor', birth_date: '1995-06-15' });
+    const vals   = computeValuations([player], [], [], mergeSettings({ ageFactor: false }));
+    const v = vals.find((val) => val.playerId === 'mlb-age-nofactor');
+    // ageAdjustment may be null or { age: null, multiplier: 1.0 } — either is acceptable
+    if (v?.ageAdjustment !== null) {
+      expect(v.ageAdjustment.multiplier).toBe(1.0);
+    }
+  });
+});

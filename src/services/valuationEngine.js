@@ -53,6 +53,11 @@ const DEFAULTS = {
   statSeason: null,
   // US-11.1: 'last1' = use only the most recent season (default); 'last3' = weighted 3-year average
   statsWindow: 'last1',
+  // US-11.3: age factor — disabled by default (single-year leagues); set to true for dynasty
+  ageFactor: false,
+  // Default age multiplier curve anchors. Ages between anchor points are linearly interpolated.
+  // Ages below the minimum anchor use the minimum anchor's value; above maximum use that value.
+  ageCurve: { 22: 1.05, 24: 1.0, 28: 1.0, 30: 0.94, 32: 0.90, 35: 0.85 },
   // Scoring categories
   hittingCategories:  ['hr', 'r', 'rbi', 'sb', 'avg'],
   pitchingCategories: ['w', 'k', 'sv', 'era', 'whip'],
@@ -208,7 +213,7 @@ function loadStatRows(season, group) {
       const rows = db.prepare(`
         SELECT
           p.player_id, p.name, p.positions, p.mlb_team, p.status, p.is_available,
-          p.depth_chart_rank, p.depth_chart_position,
+          p.depth_chart_rank, p.depth_chart_position, p.birth_date,
           ps.games_played, ps.ab, ps.r,  ps.h,  ps.hr, ps.rbi, ps.bb,
           ps.k,  ps.sb, ps.avg, ps.obp, ps.slg, ps.ops,
           ps.w,  ps.l,  ps.era, ps.whip, ps.k9, ps.ip, ps.sv, ps.hld
@@ -220,6 +225,71 @@ function loadStatRows(season, group) {
     } catch (_) {}
   }
   return [];
+}
+
+/**
+ * US-11.3: Parses the age multiplier curve from leagueSettings or the
+ * VALUATION_AGE_CURVE env var.  Falls back to DEFAULTS.ageCurve.
+ * @param {object|undefined} inputCurve
+ * @returns {object} — { [age: string]: multiplier }
+ */
+function parseAgeCurve(inputCurve) {
+  if (inputCurve && typeof inputCurve === 'object' && !Array.isArray(inputCurve)) {
+    return inputCurve;
+  }
+  const envCurve = process.env.VALUATION_AGE_CURVE;
+  if (envCurve) {
+    try { return JSON.parse(envCurve); } catch (_) {}
+  }
+  return DEFAULTS.ageCurve;
+}
+
+/**
+ * US-11.3: Compute the age multiplier for a player given their birth date and
+ * the valuation season.  Age is measured at April 1 of the season (MLB opening day proxy).
+ *
+ * Uses linear interpolation between anchor points in the curve.
+ *
+ * @param {string|null} birthDate  — "YYYY-MM-DD"
+ * @param {number}      season     — e.g. 2025
+ * @param {object}      curve      — merged age curve from settings
+ * @returns {{ age: number|null, multiplier: number }}
+ */
+function computeAgeMultiplier(birthDate, season, curve) {
+  if (!birthDate) return { age: null, multiplier: 1.0 };
+
+  const birth   = new Date(birthDate + 'T00:00:00Z');
+  const refDate = new Date(`${season}-04-01T00:00:00Z`);
+  if (isNaN(birth.getTime())) return { age: null, multiplier: 1.0 };
+
+  // Age in whole years at April 1 of the season
+  let age = refDate.getUTCFullYear() - birth.getUTCFullYear();
+  const notYetBirthday =
+    refDate.getUTCMonth() < birth.getUTCMonth() ||
+    (refDate.getUTCMonth() === birth.getUTCMonth() && refDate.getUTCDate() < birth.getUTCDate());
+  if (notYetBirthday) age--;
+
+  // Build sorted anchor list from the curve object
+  const anchors = Object.entries(curve)
+    .map(([a, m]) => [Number(a), Number(m)])
+    .sort((a, b) => a[0] - b[0]);
+
+  if (!anchors.length) return { age, multiplier: 1.0 };
+
+  // Clamp to curve range
+  if (age <= anchors[0][0]) return { age, multiplier: anchors[0][1] };
+  if (age >= anchors[anchors.length - 1][0]) return { age, multiplier: anchors[anchors.length - 1][1] };
+
+  // Linear interpolation between the two surrounding anchors
+  for (let i = 0; i < anchors.length - 1; i++) {
+    const [a0, m0] = anchors[i];
+    const [a1, m1] = anchors[i + 1];
+    if (age >= a0 && age <= a1) {
+      const t = (age - a0) / (a1 - a0);
+      return { age, multiplier: m0 + t * (m1 - m0) };
+    }
+  }
+  return { age, multiplier: 1.0 };
 }
 
 /**
@@ -254,7 +324,7 @@ function loadWeightedStatRows(group, weights = [0.5, 0.3, 0.2]) {
     const rows = db.prepare(`
       SELECT
         p.player_id, p.name, p.positions, p.mlb_team, p.status, p.is_available,
-        p.depth_chart_rank, p.depth_chart_position,
+        p.depth_chart_rank, p.depth_chart_position, p.birth_date,
         ps.season, ps.games_played, ps.ab, ps.r, ps.h, ps.hr, ps.rbi, ps.bb,
         ps.k, ps.sb, ps.avg, ps.obp, ps.slg, ps.ops,
         ps.w, ps.l, ps.era, ps.whip, ps.k9, ps.ip, ps.sv, ps.hld
@@ -335,7 +405,7 @@ function loadProjectionRows(season, group, source) {
     const rows = db.prepare(`
       SELECT
         p.player_id, p.name, p.positions, p.mlb_team, p.status, p.is_available,
-        p.depth_chart_rank, p.depth_chart_position,
+        p.depth_chart_rank, p.depth_chart_position, p.birth_date,
         pr.games_played, pr.ab, pr.r,  pr.h,  pr.hr, pr.rbi, pr.bb,
         pr.k, pr.sb, pr.avg, pr.obp, pr.slg, pr.ops,
         pr.w, pr.l, pr.era, pr.whip, pr.k9, pr.ip, pr.sv, pr.hld
@@ -484,6 +554,12 @@ function projectRowsWithReliability(rows, statGroup, settings) {
     const expectedVolume = sample > 0 ? sample : fallbackVolume;
     const availMult = availabilityMultiplier(row, statGroup, settings);
 
+    // US-11.3: age factor — only applied when leagueSettings.ageFactor === true
+    const { age, multiplier: ageMult } = settings.ageFactor
+      ? computeAgeMultiplier(row.birth_date, settings.statSeason || (new Date().getFullYear() - 1), settings.ageCurve)
+      : { age: null, multiplier: 1.0 };
+    const combinedMult = availMult * ageMult;
+
     if (isHitting) {
       const relHR = reliabilityFactor(sample, kMap.hr);
       const relR = reliabilityFactor(sample, kMap.r);
@@ -505,16 +581,17 @@ function projectRowsWithReliability(rows, statGroup, settings) {
 
       return {
         ...row,
-        ab: expectedVolume * availMult,
-        h: projAvg * expectedVolume * availMult,
-        hr: projHrRate * expectedVolume * availMult,
-        r: projRRate * expectedVolume * availMult,
-        rbi: projRbiRate * expectedVolume * availMult,
-        sb: projSbRate * expectedVolume * availMult,
-        bb: (Number(row.bb) || 0) * availMult,
-        k: (Number(row.k) || 0) * availMult,
+        ab: expectedVolume * combinedMult,
+        h: projAvg * expectedVolume * combinedMult,
+        hr: projHrRate * expectedVolume * combinedMult,
+        r: projRRate * expectedVolume * combinedMult,
+        rbi: projRbiRate * expectedVolume * combinedMult,
+        sb: projSbRate * expectedVolume * combinedMult,
+        bb: (Number(row.bb) || 0) * combinedMult,
+        k: (Number(row.k) || 0) * combinedMult,
         avg: projAvg,
         availabilityMultiplier: availMult,
+        ageAdjustment: { age, multiplier: ageMult },
       };
     }
 
@@ -538,13 +615,14 @@ function projectRowsWithReliability(rows, statGroup, settings) {
 
     return {
       ...row,
-      ip: expectedVolume * availMult,
-      w: projWRate * expectedVolume * availMult,
-      k: projKRate * expectedVolume * availMult,
-      sv: projSvRate * expectedVolume * availMult,
+      ip: expectedVolume * combinedMult,
+      w: projWRate * expectedVolume * combinedMult,
+      k: projKRate * expectedVolume * combinedMult,
+      sv: projSvRate * expectedVolume * combinedMult,
       era: projEra,
       whip: projWhip,
       availabilityMultiplier: availMult,
+      ageAdjustment: { age, multiplier: ageMult },
     };
   });
 }
@@ -692,6 +770,7 @@ function assignDollarValues(
       depthChartRank: Number(p.depth_chart_rank) || null,
       depthChartPosition: p.depth_chart_position || null,
       availabilityMultiplier: Number(p.availabilityMultiplier) || 1,
+      ageAdjustment: p.ageAdjustment || null,
       dollarValue,
       projectedValue: dollarValue,  // pre-draft: projected = dollar value
       rank:           p.rank,
@@ -1218,6 +1297,8 @@ function mergeSettings(leagueSettings = {}) {
     minIP:               Number(leagueSettings.minIP)               || DEFAULTS.minIP,
     statSeason:          Number(leagueSettings.statSeason)          || null,
     statsWindow:         leagueSettings.statsWindow === 'last3' ? 'last3' : DEFAULTS.statsWindow,
+    ageFactor:           leagueSettings.ageFactor === true,
+    ageCurve:            parseAgeCurve(leagueSettings.ageCurve),
     hittingCategories:   leagueSettings.hittingCategories  || DEFAULTS.hittingCategories,
     pitchingCategories:  leagueSettings.pitchingCategories || DEFAULTS.pitchingCategories,
     // Keep Set types — don't allow override for now (US-5.3 can extend)

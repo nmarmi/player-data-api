@@ -44,6 +44,8 @@ function migrate() {
   for (const col of [
     'ALTER TABLE players ADD COLUMN depth_chart_rank     INTEGER',
     'ALTER TABLE players ADD COLUMN depth_chart_position TEXT',
+    // US-11.3: birth date for age-factor valuation
+    'ALTER TABLE players ADD COLUMN birth_date           TEXT',
   ]) {
     try { db.exec(col); } catch (_) { /* column already exists */ }
   }
