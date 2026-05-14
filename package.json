@@ -14,7 +14,8 @@
     "import-injuries": "node src/jobs/ingestInjuries.js",
     "import-depth-charts": "node src/jobs/ingestDepthCharts.js",
     "import-transactions": "node src/jobs/ingestTransactions.js",
-    "import-stats": "node src/jobs/ingestStats.js"
+    "import-stats": "node src/jobs/ingestStats.js",
+    "import-projections": "node scripts/import-projections.js"
   },
   "jest": {
     "testEnvironment": "node",

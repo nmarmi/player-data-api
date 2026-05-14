@@ -319,13 +319,64 @@ function loadWeightedStatRows(group, weights = [0.5, 0.3, 0.2]) {
 }
 
 /**
- * Returns the correct stat rows based on settings.statsWindow.
- * 'last1' → loadStatRows(season, group)
- * 'last3' → loadWeightedStatRows(group)
+ * US-11.2: Load player_projections rows for a given season + group + source.
+ * Returns [] when the DB is unavailable or no projection rows exist.
+ *
+ * @param {number} season
+ * @param {'hitting'|'pitching'} group
+ * @param {string} source  — 'steamer' | 'zips' | 'manual' (from VALUATION_PROJECTION_SOURCE)
+ * @returns {Array<object>}
+ */
+function loadProjectionRows(season, group, source) {
+  const db = tryGetDb();
+  if (!db) return [];
+  try {
+    // player_projections has the same columns as player_stats but also `source`
+    const rows = db.prepare(`
+      SELECT
+        p.player_id, p.name, p.positions, p.mlb_team, p.status, p.is_available,
+        p.depth_chart_rank, p.depth_chart_position,
+        pr.games_played, pr.ab, pr.r,  pr.h,  pr.hr, pr.rbi, pr.bb,
+        pr.k, pr.sb, pr.avg, pr.obp, pr.slg, pr.ops,
+        pr.w, pr.l, pr.era, pr.whip, pr.k9, pr.ip, pr.sv, pr.hld
+      FROM player_projections pr
+      JOIN players p ON p.player_id = pr.player_id
+      WHERE pr.season = ? AND pr.stat_group = ? AND pr.source = ?
+    `).all(season, group, source);
+    return rows;
+  } catch (_) {
+    return [];
+  }
+}
+
+/**
+ * US-11.2: Returns the correct stat rows based on settings.statsWindow and
+ * whether projections are available for the upcoming season.
+ *
+ * Priority:
+ *   1. player_projections (upcoming season, VALUATION_PROJECTION_SOURCE)
+ *   2. player_stats (historical, respecting statsWindow: last1 | last3)
+ *
+ * @param {object} settings  — merged league settings
+ * @param {number} season    — the historical season to use as fallback
+ * @param {'hitting'|'pitching'} group
+ * @returns {{ rows: Array<object>, usedProjectionSource: string|null }}
  */
 function loadStatRowsForSettings(settings, season, group) {
-  if (settings.statsWindow === 'last3') return loadWeightedStatRows(group);
-  return loadStatRows(season, group);
+  const projSource    = process.env.VALUATION_PROJECTION_SOURCE || 'steamer';
+  const upcomingSeason = new Date().getFullYear(); // projections are for the current/upcoming year
+
+  if (settings.useProjections !== false) {
+    const projRows = loadProjectionRows(upcomingSeason, group, projSource);
+    if (projRows.length > 0) {
+      return { rows: projRows, usedProjectionSource: projSource };
+    }
+  }
+
+  const rows = settings.statsWindow === 'last3'
+    ? loadWeightedStatRows(group)
+    : loadStatRows(season, group);
+  return { rows, usedProjectionSource: null };
 }
 
 // ── Core computation ──────────────────────────────────────────────────────────
@@ -1330,13 +1381,15 @@ function runValuations(leagueSettings = {}, draftState = {}) {
   // Default to last calendar year if no specific season is requested
   const season   = settings.statSeason || (new Date().getFullYear() - 1);
 
-  // STEP 1: Load all hitter and pitcher stat rows for the target season (or 3-year weighted)
-  const allHitters  = loadStatRowsForSettings(settings, season, 'hitting');
-  const allPitchers = loadStatRowsForSettings(settings, season, 'pitching');
+  // STEP 1: Load all hitter and pitcher stat rows for the target season (or 3-year weighted,
+  //         or projections if available — US-11.2)
+  const { rows: allHitters,  usedProjectionSource: hitterProjSource  } = loadStatRowsForSettings(settings, season, 'hitting');
+  const { rows: allPitchers, usedProjectionSource: pitcherProjSource } = loadStatRowsForSettings(settings, season, 'pitching');
+  const usedProjectionSource = hitterProjSource || pitcherProjSource || null;
   const allPoolPlayers = loadPlayerPool();
 
   if (!allHitters.length && !allPitchers.length) {
-    return { valuations: [], meta: { season, statsWindow: settings.statsWindow, note: 'No player stats found — run import-stats first' } };
+    return { valuations: [], meta: { season, statsWindow: settings.statsWindow, usedProjectionSource, note: 'No player stats found — run import-stats first' } };
   }
 
   // If a live draft is in progress, only value players who haven't been picked yet
@@ -1414,8 +1467,9 @@ function runValuations(leagueSettings = {}, draftState = {}) {
 
   const meta = {
     season,
-    statsWindow:      settings.statsWindow,
-    numTeams:         effectiveSettings.numTeams,
+    statsWindow:           settings.statsWindow,
+    usedProjectionSource:  usedProjectionSource,
+    numTeams:              effectiveSettings.numTeams,
     budget:           effectiveSettings.budget,
     hitterSlots:      effectiveSettings.numTeams * effectiveSettings.hitterSlotsPerTeam,
     pitcherSlots:     effectiveSettings.numTeams * effectiveSettings.pitcherSlotsPerTeam,
@@ -1443,8 +1497,8 @@ function getExclusionDiagnostics(leagueSettings = {}, draftState = {}, opts = {}
   const season = settings.statSeason || (new Date().getFullYear() - 1);
   const targetIds = Array.isArray(opts.playerIds) ? opts.playerIds.filter(Boolean) : [];
 
-  const allHitters = loadStatRowsForSettings(settings, season, 'hitting');
-  const allPitchers = loadStatRowsForSettings(settings, season, 'pitching');
+  const { rows: allHitters  } = loadStatRowsForSettings(settings, season, 'hitting');
+  const { rows: allPitchers } = loadStatRowsForSettings(settings, season, 'pitching');
   const allPoolPlayers = loadPlayerPool();
 
   const purchasedIds = new Set(
@@ -1508,6 +1562,7 @@ module.exports = {
   computeRemainingSlotsByPosition,
   loadStatRows,
   loadWeightedStatRows,
+  loadProjectionRows,
   DEFAULTS,
   HITTER_POSITIONS_SET,
   PITCHER_POSITIONS_SET,

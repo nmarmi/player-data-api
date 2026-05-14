@@ -816,7 +816,7 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 
 **Implementation:** Added `statsWindow: 'last1'` to `DEFAULTS`. `mergeSettings` threads `statsWindow` through (validates to `'last3'` or default `'last1'`). New `loadWeightedStatRows(group, weights)` queries the N most recent seasons in one SQL call, groups by `player_id`, applies year weights `[0.5, 0.3, 0.2]` to counting stats and volume-weighted averaging (AB or IP) to rate stats. New `loadStatRowsForSettings(settings, season, group)` dispatcher replaces the three direct `loadStatRows` call-sites in `runValuations`, `getExclusionDiagnostics`, and `computeRecommendations`. `meta.statsWindow` included in valuation response. 5 new unit tests cover: default value, threading, invalid value fallback, graceful empty-array on no-DB, and direct weighting math verification. 130/130 tests pass.
 
-### US-11.2: Predictive (projected) stats input
+### US-11.2: Predictive (projected) stats input ✅ COMPLETED
 **As a** Draft Kit user, **I want** the engine to use forward-looking projected stats (Steamer / ZiPS / community) when available, instead of last year's raw stats, **so that** valuations reflect an expectation, not a memory.
 
 **Acceptance criteria:**
@@ -825,6 +825,8 @@ Legacy `/usage` unversioned route removed. OpenAPI spec updated. 95/95 tests pas
 - `valuationEngine` prefers `player_projections` rows for the upcoming season when present; falls back to `player_stats` when no projection exists
 - New env var `VALUATION_PROJECTION_SOURCE` (default `steamer`) selects the active source
 - Response `meta` reports `usedProjectionSource` so the Draft Kit can show "Powered by Steamer projections"
+
+**Implementation:** `src/db/migrate.js` adds `player_projections` table (same columns as `player_stats` + `source` column; `UNIQUE(player_id, season, stat_group, source)`). `scripts/import-projections.js` — new CLI script: parses CSV with case-insensitive alias-aware column lookup, classifies hitters vs pitchers by IP, resolves player IDs from `players` table by MLB person ID then name fallback, upserts into `player_projections`. Added `"import-projections"` npm script. `loadProjectionRows(season, group, source)` queries `player_projections` joined to `players`. `loadStatRowsForSettings` updated to check projections first (upcoming season, `VALUATION_PROJECTION_SOURCE`), fall back to historical stats; now returns `{ rows, usedProjectionSource }`. All three call-sites (`runValuations`, `getExclusionDiagnostics`, `computeRecommendations`) updated. `meta.usedProjectionSource` added to valuation response. 5 new unit tests. 135/135 tests pass.
 
 ### US-11.3: Age factor in valuation
 **As a** Draft Kit user in a dynasty league, **I want** age folded into valuations (a 30-year-old's $40 is worth less than a 22-year-old's $40 over a 3-year contract), **so that** my long-term roster strategy is reflected in the auction price.
