@@ -8,9 +8,42 @@ const { migrate } = require('../src/db/migrate');
 const { createAccount, createKey } = require('../src/db/developerAccounts');
 const { getDb } = require('../src/db/connection');
 
+const TEST_PLAYER_PREFIX = 'mlb-901';
+
 beforeAll(() => {
   // Ensure all tables (including api_keys) exist in the test DB.
   try { migrate(); } catch (_) {}
+
+  // Seed minimal player + stats rows so /players and /valuations endpoints return data.
+  const db = getDb();
+  const season = new Date().getFullYear() - 1;
+  const insertPlayer = db.prepare(`
+    INSERT OR IGNORE INTO players (player_id, mlb_person_id, name, player_name, positions, mlb_team, status)
+    VALUES (@player_id, @mlb_person_id, @name, @name, @positions, @mlb_team, 'active')
+  `);
+  const insertStat = db.prepare(`
+    INSERT OR REPLACE INTO player_stats (player_id, mlb_person_id, season, stat_group, games_played, ab, r, h, hr, rbi, bb, k, sb, avg, obp, slg, ip, w, era, whip, sv)
+    VALUES (@player_id, @mlb_person_id, @season, @stat_group, 162, @ab, @r, @h, @hr, @rbi, @bb, @k, @sb, @avg, @obp, @slg, @ip, @w, @era, @whip, @sv)
+  `);
+  const testData = [
+    { player_id: 'mlb-901001', mlb_person_id: 901001, name: 'Test Hitter 1', positions: '["OF"]', mlb_team: 'NYY', stat_group: 'hitting', ab: 550, r: 90, h: 165, hr: 30, rbi: 95, bb: 75, k: 120, sb: 15, avg: 0.3, obp: 0.38, slg: 0.52, ip: 0, w: 0, era: 0, whip: 0, sv: 0 },
+    { player_id: 'mlb-901002', mlb_person_id: 901002, name: 'Test Hitter 2', positions: '["1B"]', mlb_team: 'LAD', stat_group: 'hitting', ab: 520, r: 80, h: 150, hr: 25, rbi: 85, bb: 65, k: 130, sb: 5, avg: 0.288, obp: 0.36, slg: 0.49, ip: 0, w: 0, era: 0, whip: 0, sv: 0 },
+    { player_id: 'mlb-901003', mlb_person_id: 901003, name: 'Test Hitter 3', positions: '["3B"]', mlb_team: 'ATL', stat_group: 'hitting', ab: 500, r: 75, h: 140, hr: 22, rbi: 78, bb: 55, k: 115, sb: 8, avg: 0.28, obp: 0.35, slg: 0.47, ip: 0, w: 0, era: 0, whip: 0, sv: 0 },
+    { player_id: 'mlb-901004', mlb_person_id: 901004, name: 'Test Pitcher 1', positions: '["SP"]', mlb_team: 'HOU', stat_group: 'pitching', ab: 0, r: 0, h: 0, hr: 0, rbi: 0, bb: 0, k: 200, sb: 0, avg: 0, obp: 0, slg: 0, ip: 180, w: 15, era: 3.2, whip: 1.1, sv: 0 },
+    { player_id: 'mlb-901005', mlb_person_id: 901005, name: 'Test Closer 1', positions: '["RP"]', mlb_team: 'BOS', stat_group: 'pitching', ab: 0, r: 0, h: 0, hr: 0, rbi: 0, bb: 0, k: 80, sb: 0, avg: 0, obp: 0, slg: 0, ip: 65, w: 4, era: 2.8, whip: 1.05, sv: 35 },
+  ];
+  db.transaction(() => {
+    for (const p of testData) {
+      insertPlayer.run(p);
+      insertStat.run({ ...p, season });
+    }
+  })();
+});
+
+afterAll(() => {
+  const db = getDb();
+  db.exec(`DELETE FROM player_stats WHERE player_id LIKE '${TEST_PLAYER_PREFIX}%'`);
+  db.exec(`DELETE FROM players WHERE player_id LIKE '${TEST_PLAYER_PREFIX}%'`);
 });
 
 function buildDraftKitLeagueSettings() {

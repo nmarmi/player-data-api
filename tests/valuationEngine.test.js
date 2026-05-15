@@ -7,6 +7,8 @@ const {
   runValuations,
 } = require('../src/services/valuationEngine');
 const { getValuations } = require('../src/controllers/valuationsController');
+const { migrate } = require('../src/db/migrate');
+const { getDb } = require('../src/db/connection');
 
 function makeHitter(overrides = {}) {
   return {
@@ -98,6 +100,45 @@ describe('valuationEngine (US-7.3)', () => {
     makePitcher({ player_id: 'mlb-200004', name: 'Closer', positions: JSON.stringify(['RP']), mlb_team: 'HOU', w: 4, sv: 36, era: 2.8, whip: 1.01, k: 95, ip: 65 }),
   ];
 
+  // Seed the local fixture data into the DB so runValuations() (which reads player_stats)
+  // returns non-empty results. Tests that use computeValuations() directly don't need this.
+  beforeAll(() => {
+    try { migrate(); } catch (_) {}
+    const db = getDb();
+    const season = new Date().getFullYear() - 1;
+    const insertPlayer = db.prepare(`
+      INSERT OR IGNORE INTO players (player_id, mlb_person_id, name, player_name, positions, mlb_team, status, depth_chart_rank, depth_chart_position)
+      VALUES (@player_id, @mlb_person_id, @name, @name, @positions, @mlb_team, @status, @depth_chart_rank, @depth_chart_position)
+    `);
+    const insertHitterStat = db.prepare(`
+      INSERT OR REPLACE INTO player_stats (player_id, mlb_person_id, season, stat_group, games_played, ab, r, h, hr, rbi, bb, k, sb, avg, obp, slg)
+      VALUES (@player_id, @mlb_person_id, @season, 'hitting', 162, @ab, @r, @h, @hr, @rbi, @bb, @k, @sb, @avg, @obp, @slg)
+    `);
+    const insertPitcherStat = db.prepare(`
+      INSERT OR REPLACE INTO player_stats (player_id, mlb_person_id, season, stat_group, games_played, ip, w, era, whip, k, sv, hld)
+      VALUES (@player_id, @mlb_person_id, @season, 'pitching', 35, @ip, @w, @era, @whip, @k, @sv, @hld)
+    `);
+    db.transaction(() => {
+      for (const p of hitters) {
+        const pid = parseInt(p.player_id.replace('mlb-', ''), 10);
+        insertPlayer.run({ ...p, mlb_person_id: pid });
+        insertHitterStat.run({ player_id: p.player_id, mlb_person_id: pid, season, ab: p.ab, r: p.r, h: p.h || 0, hr: p.hr, rbi: p.rbi, bb: p.bb || 0, k: p.k, sb: p.sb, avg: p.avg, obp: p.obp || 0, slg: p.slg || 0 });
+      }
+      for (const p of pitchers) {
+        const pid = parseInt(p.player_id.replace('mlb-', ''), 10);
+        insertPlayer.run({ ...p, mlb_person_id: pid });
+        insertPitcherStat.run({ player_id: p.player_id, mlb_person_id: pid, season, ip: p.ip, w: p.w, era: p.era, whip: p.whip, k: p.k, sv: p.sv || 0, hld: p.hld || 0 });
+      }
+    })();
+  });
+
+  afterAll(() => {
+    const db = getDb();
+    const ids = [...hitters, ...pitchers].map(p => `'${p.player_id}'`).join(',');
+    db.exec(`DELETE FROM player_stats WHERE player_id IN (${ids})`);
+    db.exec(`DELETE FROM players WHERE player_id IN (${ids})`);
+  });
+
   test('values sum approximately to total league salary pool', () => {
     const settings = mergeSettings({
       numTeams: 10,
@@ -171,7 +212,7 @@ describe('valuationEngine (US-7.3)', () => {
     const pre = runValuations(leagueSettings, {});
 
     const liveDraft = runValuations(leagueSettings, {
-      purchasedPlayers: [{ playerId: 'mlb-649017', price: 42 }],
+      purchasedPlayers: [{ playerId: 'mlb-100003', price: 42 }],
       teamBudgets: { t1: 180, t2: 170 },
       filledRosterSlots: {
         t1: { OF: 1, SP: 1, C: 1 },
