@@ -18,19 +18,35 @@ beforeAll(() => {
   const db = getDb();
   const season = new Date().getFullYear() - 1;
   const insertPlayer = db.prepare(`
-    INSERT OR IGNORE INTO players (player_id, mlb_person_id, name, player_name, positions, mlb_team, status)
-    VALUES (@player_id, @mlb_person_id, @name, @name, @positions, @mlb_team, 'active')
+    INSERT OR IGNORE INTO players (player_id, mlb_person_id, name, player_name, positions, mlb_team, mlb_team_id, status)
+    VALUES (@player_id, @mlb_person_id, @name, @name, @positions, @mlb_team, @mlb_team_id, 'active')
   `);
   const insertStat = db.prepare(`
     INSERT OR REPLACE INTO player_stats (player_id, mlb_person_id, season, stat_group, games_played, ab, r, h, hr, rbi, bb, k, sb, avg, obp, slg, ip, w, era, whip, sv)
     VALUES (@player_id, @mlb_person_id, @season, @stat_group, 162, @ab, @r, @h, @hr, @rbi, @bb, @k, @sb, @avg, @obp, @slg, @ip, @w, @era, @whip, @sv)
   `);
+  // MLB team IDs for seed data
+  const TEAMS = { NYY: 'mlb-147', LAD: 'mlb-119', ATL: 'mlb-144', HOU: 'mlb-117', BOS: 'mlb-111',
+                  NYM: 'mlb-121', PHI: 'mlb-143', SD: 'mlb-135', SEA: 'mlb-136', STL: 'mlb-138' };
+  // 20 hitters + 6 pitchers = 26 players, enough for the 10-team valuation test
   const testData = [
-    { player_id: 'mlb-901001', mlb_person_id: 901001, name: 'Test Hitter 1', positions: '["OF"]', mlb_team: 'NYY', stat_group: 'hitting', ab: 550, r: 90, h: 165, hr: 30, rbi: 95, bb: 75, k: 120, sb: 15, avg: 0.3, obp: 0.38, slg: 0.52, ip: 0, w: 0, era: 0, whip: 0, sv: 0 },
-    { player_id: 'mlb-901002', mlb_person_id: 901002, name: 'Test Hitter 2', positions: '["1B"]', mlb_team: 'LAD', stat_group: 'hitting', ab: 520, r: 80, h: 150, hr: 25, rbi: 85, bb: 65, k: 130, sb: 5, avg: 0.288, obp: 0.36, slg: 0.49, ip: 0, w: 0, era: 0, whip: 0, sv: 0 },
-    { player_id: 'mlb-901003', mlb_person_id: 901003, name: 'Test Hitter 3', positions: '["3B"]', mlb_team: 'ATL', stat_group: 'hitting', ab: 500, r: 75, h: 140, hr: 22, rbi: 78, bb: 55, k: 115, sb: 8, avg: 0.28, obp: 0.35, slg: 0.47, ip: 0, w: 0, era: 0, whip: 0, sv: 0 },
-    { player_id: 'mlb-901004', mlb_person_id: 901004, name: 'Test Pitcher 1', positions: '["SP"]', mlb_team: 'HOU', stat_group: 'pitching', ab: 0, r: 0, h: 0, hr: 0, rbi: 0, bb: 0, k: 200, sb: 0, avg: 0, obp: 0, slg: 0, ip: 180, w: 15, era: 3.2, whip: 1.1, sv: 0 },
-    { player_id: 'mlb-901005', mlb_person_id: 901005, name: 'Test Closer 1', positions: '["RP"]', mlb_team: 'BOS', stat_group: 'pitching', ab: 0, r: 0, h: 0, hr: 0, rbi: 0, bb: 0, k: 80, sb: 0, avg: 0, obp: 0, slg: 0, ip: 65, w: 4, era: 2.8, whip: 1.05, sv: 35 },
+    ...Array.from({ length: 20 }, (_, i) => {
+      const id = 901001 + i;
+      const teams = Object.keys(TEAMS);
+      const team = teams[i % teams.length];
+      const positions = [['OF','OF','OF','1B','2B','3B','SS','C','OF','OF','1B','OF','3B','SS','2B','C','OF','1B','3B','OF'][i]];
+      return { player_id: `mlb-${id}`, mlb_person_id: id, name: `Test Hitter ${i+1}`, positions: JSON.stringify(positions),
+               mlb_team: team, mlb_team_id: TEAMS[team], stat_group: 'hitting',
+               ab: 500 + (i * 5), r: 70 + i*2, h: 140 + i*3, hr: 15 + i, rbi: 60 + i*2,
+               bb: 50 + i, k: 100 + i*2, sb: i*2, avg: 0.25 + i*0.003, obp: 0.32 + i*0.003,
+               slg: 0.42 + i*0.005, ip: 0, w: 0, era: 0, whip: 0, sv: 0 };
+    }),
+    { player_id: 'mlb-901021', mlb_person_id: 901021, name: 'Test SP 1', positions: '["SP"]', mlb_team: 'HOU', mlb_team_id: 'mlb-117', stat_group: 'pitching', ab:0,r:0,h:0,hr:0,rbi:0,bb:0, k:220,sb:0,avg:0,obp:0,slg:0, ip:195,w:17,era:2.9,whip:1.05,sv:0 },
+    { player_id: 'mlb-901022', mlb_person_id: 901022, name: 'Test SP 2', positions: '["SP"]', mlb_team: 'BOS', mlb_team_id: 'mlb-111', stat_group: 'pitching', ab:0,r:0,h:0,hr:0,rbi:0,bb:0, k:190,sb:0,avg:0,obp:0,slg:0, ip:180,w:14,era:3.3,whip:1.12,sv:0 },
+    { player_id: 'mlb-901023', mlb_person_id: 901023, name: 'Test SP 3', positions: '["SP"]', mlb_team: 'NYM', mlb_team_id: 'mlb-121', stat_group: 'pitching', ab:0,r:0,h:0,hr:0,rbi:0,bb:0, k:170,sb:0,avg:0,obp:0,slg:0, ip:165,w:12,era:3.7,whip:1.2,sv:0 },
+    { player_id: 'mlb-901024', mlb_person_id: 901024, name: 'Test RP 1', positions: '["RP"]', mlb_team: 'PHI', mlb_team_id: 'mlb-143', stat_group: 'pitching', ab:0,r:0,h:0,hr:0,rbi:0,bb:0, k:90,sb:0,avg:0,obp:0,slg:0, ip:70,w:5,era:2.6,whip:1.0,sv:38 },
+    { player_id: 'mlb-901025', mlb_person_id: 901025, name: 'Test RP 2', positions: '["RP"]', mlb_team: 'SD', mlb_team_id: 'mlb-135', stat_group: 'pitching', ab:0,r:0,h:0,hr:0,rbi:0,bb:0, k:75,sb:0,avg:0,obp:0,slg:0, ip:60,w:3,era:3.1,whip:1.1,sv:25 },
+    { player_id: 'mlb-901026', mlb_person_id: 901026, name: 'Test RP 3', positions: '["RP"]', mlb_team: 'SEA', mlb_team_id: 'mlb-136', stat_group: 'pitching', ab:0,r:0,h:0,hr:0,rbi:0,bb:0, k:60,sb:0,avg:0,obp:0,slg:0, ip:55,w:4,era:3.5,whip:1.15,sv:15 },
   ];
   db.transaction(() => {
     for (const p of testData) {
@@ -41,9 +57,11 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  const db = getDb();
-  db.exec(`DELETE FROM player_stats WHERE player_id LIKE '${TEST_PLAYER_PREFIX}%'`);
-  db.exec(`DELETE FROM players WHERE player_id LIKE '${TEST_PLAYER_PREFIX}%'`);
+  try {
+    const db = getDb();
+    db.exec(`DELETE FROM player_stats WHERE player_id LIKE '${TEST_PLAYER_PREFIX}%'`);
+    db.exec(`DELETE FROM players WHERE player_id LIKE '${TEST_PLAYER_PREFIX}%'`);
+  } catch (_) {}
 });
 
 function buildDraftKitLeagueSettings() {
