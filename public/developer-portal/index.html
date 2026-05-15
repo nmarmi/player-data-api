@@ -204,8 +204,9 @@
     }
 
     function showDashboard(account) {
+      if (!account) return showAuth(); // guard against undefined account
       document.getElementById('page-auth').style.display = 'none';
-      document.getElementById('page-dashboard').style.display = '';
+      document.getElementById('page-dashboard').style.display = 'block'; // 'block' overrides CSS display:none
       document.getElementById('header-email').textContent = account.email;
       document.getElementById('logout-btn').style.display = '';
       document.getElementById('account-email').textContent = account.email;
@@ -213,7 +214,7 @@
     }
 
     function showAuth() {
-      document.getElementById('page-auth').style.display = '';
+      document.getElementById('page-auth').style.display = 'block'; // explicit for clarity
       document.getElementById('page-dashboard').style.display = 'none';
       document.getElementById('header-email').textContent = '';
       document.getElementById('logout-btn').style.display = 'none';
