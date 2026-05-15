@@ -58,9 +58,31 @@ function getPlayerPool(req, res) {
   res.json({ success: true, players: pool, ...freshness(PLAYER_SOURCES) });
 }
 
+// US-21.1 / rubric: Player Details — Transactions/Contract Status
+function getPlayerTransactions(req, res) {
+  const playerId = req.params.playerId;
+  let _getDb = null;
+  try { _getDb = require('../db/connection').getDb; } catch (_) {}
+  if (!_getDb) return res.json({ success: true, transactions: [] });
+  try {
+    const db = _getDb();
+    const rows = db.prepare(`
+      SELECT txn_id, type_code, type_desc, from_team_id, to_team_id, effective_date, description, recorded_at
+      FROM   transactions
+      WHERE  player_id = ?
+      ORDER  BY effective_date DESC, txn_id DESC
+      LIMIT  10
+    `).all(playerId);
+    return res.json({ success: true, transactions: rows });
+  } catch (_) {
+    return res.json({ success: true, transactions: [] });
+  }
+}
+
 module.exports = {
   listPlayers,
   getPlayerFilters,
   getPlayerPool,
   getPlayerById,
+  getPlayerTransactions,
 };

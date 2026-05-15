@@ -514,10 +514,18 @@ function matchesTeam(player, teams) {
   return teams.includes(String(player.mlbTeam || '').toUpperCase());
 }
 
+// Pitcher position aliases: SP/RP/P are all stored as 'P' after ingest normalization
+const PITCHER_ALIASES = new Set(['SP', 'RP', 'P']);
+
 function matchesPosition(player, positions) {
   if (!positions.length) return true;
   const tokens = playerPositionTokens(player);
-  return positions.some((position) => tokens.includes(position));
+  return positions.some((position) => {
+    if (tokens.includes(position)) return true;
+    // If query asks for SP or RP or P, match any pitcher (stored as 'P')
+    if (PITCHER_ALIASES.has(position) && tokens.some((t) => PITCHER_ALIASES.has(t))) return true;
+    return false;
+  });
 }
 
 function matchesRanges(player, ranges) {

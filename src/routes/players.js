@@ -1,6 +1,6 @@
 const express = require('express');
 const { requireLicense } = require('../middleware/license');
-const { listPlayers, getPlayerFilters, getPlayerPool, getPlayerById } = require('../controllers/playersController');
+const { listPlayers, getPlayerFilters, getPlayerPool, getPlayerById, getPlayerTransactions } = require('../controllers/playersController');
 const { getValuations } = require('../controllers/valuationsController');
 const {
   getRecommendations,
@@ -17,6 +17,7 @@ router.post('/valuations', requireLicense, getValuations);
 router.post('/recommendations/nominations', requireLicense, getNominations);
 router.post('/recommendations/budget', requireLicense, getBudgetStrategy);
 router.post('/recommendations', requireLicense, getRecommendations);
+router.get('/:playerId/transactions', requireLicense, getPlayerTransactions);
 router.get('/:playerId', requireLicense, getPlayerById);
 router.get('/', requireLicense, listPlayers);
 
