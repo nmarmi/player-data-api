@@ -212,7 +212,7 @@ describe('valuationEngine (US-7.3)', () => {
     const pre = runValuations(leagueSettings, {});
 
     const liveDraft = runValuations(leagueSettings, {
-      purchasedPlayers: [{ playerId: 'mlb-100003', price: 42 }],
+      purchasedPlayers: [{ playerId: 'mlb-100006', price: 42 }],
       teamBudgets: { t1: 180, t2: 170 },
       filledRosterSlots: {
         t1: { OF: 1, SP: 1, C: 1 },
