@@ -209,6 +209,18 @@ function migrate() {
     )
   `);
 
+  // One-time cleanup: remove seed rows that were stored with an empty mlb_team
+  // due to a field-name mismatch in seed.js (players.json uses `team`, not `mlbTeam`).
+  // Real players always have a team from ingestPlayerMetadata, so mlb_team = '' is a
+  // reliable signal for orphaned seed rows with fabricated MLB IDs.
+  const orphanedCount = db
+    .prepare(`SELECT COUNT(*) as n FROM players WHERE mlb_team = ''`)
+    .get().n;
+  if (orphanedCount > 0) {
+    db.prepare(`DELETE FROM players WHERE mlb_team = ''`).run();
+    log.info('cleanup: removed orphaned seed rows', { count: orphanedCount });
+  }
+
   createSyncLogTable();
   log.info('migration complete', { tablesReady: 'all' });
 }

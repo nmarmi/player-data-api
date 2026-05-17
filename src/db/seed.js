@@ -43,9 +43,15 @@ function seedIfEmpty() {
         mlb_person_id: p.mlbPersonId,
         name:          p.name || p.playerName || '',
         player_name:   p.playerName || p.name || '',
-        positions:     JSON.stringify(Array.isArray(p.positions) ? p.positions : []),
+        positions:     JSON.stringify(
+          Array.isArray(p.positions)
+            ? p.positions
+            : p.position
+              ? p.position.split(',').map((v) => v.trim()).filter(Boolean)
+              : []
+        ),
         position:      p.position || '',
-        mlb_team:      p.mlbTeam || '',
+        mlb_team:      p.mlbTeam || p.team || '',
         mlb_team_id:   p.mlbTeamId || null,
         status:        p.status || 'active',
         is_available:  p.isAvailable === false ? 0 : 1,
