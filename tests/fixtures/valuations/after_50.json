@@ -1,0 +1,288 @@
+{
+  "leagueSettings": {
+    "numberOfTeams": 12,
+    "salaryCap": 260,
+    "rosterSlots": {
+      "C": 2,
+      "1B": 1,
+      "2B": 1,
+      "3B": 1,
+      "SS": 1,
+      "OF": 5,
+      "UTIL": 1,
+      "SP": 5,
+      "RP": 3,
+      "BENCH": 4
+    },
+    "scoringType": "5x5 Roto",
+    "statSeason": 2025
+  },
+  "draftState": {
+    "purchasedPlayers": [
+      {
+        "playerId": "mlb-660271",
+        "price": 43,
+        "teamId": "fantasy-team-1"
+      },
+      {
+        "playerId": "mlb-663728",
+        "price": 40,
+        "teamId": "fantasy-team-2"
+      },
+      {
+        "playerId": "mlb-592450",
+        "price": 40,
+        "teamId": "fantasy-team-3"
+      },
+      {
+        "playerId": "mlb-656941",
+        "price": 39,
+        "teamId": "fantasy-team-4"
+      },
+      {
+        "playerId": "mlb-665742",
+        "price": 38,
+        "teamId": "fantasy-team-5"
+      },
+      {
+        "playerId": "mlb-553993",
+        "price": 33,
+        "teamId": "fantasy-team-6"
+      },
+      {
+        "playerId": "mlb-608070",
+        "price": 32,
+        "teamId": "fantasy-team-7"
+      },
+      {
+        "playerId": "mlb-596019",
+        "price": 32,
+        "teamId": "fantasy-team-8"
+      },
+      {
+        "playerId": "mlb-691406",
+        "price": 32,
+        "teamId": "fantasy-team-9"
+      },
+      {
+        "playerId": "mlb-677594",
+        "price": 32,
+        "teamId": "fantasy-team-10"
+      },
+      {
+        "playerId": "mlb-682998",
+        "price": 31,
+        "teamId": "fantasy-team-11"
+      },
+      {
+        "playerId": "mlb-691718",
+        "price": 31,
+        "teamId": "fantasy-team-12"
+      },
+      {
+        "playerId": "mlb-624413",
+        "price": 30,
+        "teamId": "fantasy-team-1"
+      },
+      {
+        "playerId": "mlb-621439",
+        "price": 30,
+        "teamId": "fantasy-team-2"
+      },
+      {
+        "playerId": "mlb-677951",
+        "price": 30,
+        "teamId": "fantasy-team-3"
+      },
+      {
+        "playerId": "mlb-682829",
+        "price": 29,
+        "teamId": "fantasy-team-4"
+      },
+      {
+        "playerId": "mlb-646240",
+        "price": 29,
+        "teamId": "fantasy-team-5"
+      },
+      {
+        "playerId": "mlb-543807",
+        "price": 29,
+        "teamId": "fantasy-team-6"
+      },
+      {
+        "playerId": "mlb-596115",
+        "price": 29,
+        "teamId": "fantasy-team-7"
+      },
+      {
+        "playerId": "mlb-665487",
+        "price": 29,
+        "teamId": "fantasy-team-8"
+      },
+      {
+        "playerId": "mlb-672695",
+        "price": 28,
+        "teamId": "fantasy-team-9"
+      },
+      {
+        "playerId": "mlb-682985",
+        "price": 28,
+        "teamId": "fantasy-team-10"
+      },
+      {
+        "playerId": "mlb-592885",
+        "price": 28,
+        "teamId": "fantasy-team-11"
+      },
+      {
+        "playerId": "mlb-621493",
+        "price": 28,
+        "teamId": "fantasy-team-12"
+      },
+      {
+        "playerId": "mlb-668227",
+        "price": 28,
+        "teamId": "fantasy-team-1"
+      },
+      {
+        "playerId": "mlb-695578",
+        "price": 28,
+        "teamId": "fantasy-team-2"
+      },
+      {
+        "playerId": "mlb-665862",
+        "price": 27,
+        "teamId": "fantasy-team-3"
+      },
+      {
+        "playerId": "mlb-641355",
+        "price": 27,
+        "teamId": "fantasy-team-4"
+      },
+      {
+        "playerId": "mlb-592518",
+        "price": 27,
+        "teamId": "fantasy-team-5"
+      },
+      {
+        "playerId": "mlb-642715",
+        "price": 27,
+        "teamId": "fantasy-team-6"
+      },
+      {
+        "playerId": "mlb-701762",
+        "price": 26,
+        "teamId": "fantasy-team-7"
+      },
+      {
+        "playerId": "mlb-647304",
+        "price": 26,
+        "teamId": "fantasy-team-8"
+      },
+      {
+        "playerId": "mlb-621566",
+        "price": 26,
+        "teamId": "fantasy-team-9"
+      },
+      {
+        "playerId": "mlb-686469",
+        "price": 26,
+        "teamId": "fantasy-team-10"
+      },
+      {
+        "playerId": "mlb-673548",
+        "price": 26,
+        "teamId": "fantasy-team-11"
+      },
+      {
+        "playerId": "mlb-667670",
+        "price": 26,
+        "teamId": "fantasy-team-12"
+      },
+      {
+        "playerId": "mlb-666176",
+        "price": 26,
+        "teamId": "fantasy-team-1"
+      },
+      {
+        "playerId": "mlb-683737",
+        "price": 25,
+        "teamId": "fantasy-team-2"
+      },
+      {
+        "playerId": "mlb-668930",
+        "price": 25,
+        "teamId": "fantasy-team-3"
+      },
+      {
+        "playerId": "mlb-663656",
+        "price": 25,
+        "teamId": "fantasy-team-4"
+      },
+      {
+        "playerId": "mlb-607043",
+        "price": 25,
+        "teamId": "fantasy-team-5"
+      },
+      {
+        "playerId": "mlb-607208",
+        "price": 25,
+        "teamId": "fantasy-team-6"
+      },
+      {
+        "playerId": "mlb-621020",
+        "price": 25,
+        "teamId": "fantasy-team-7"
+      },
+      {
+        "playerId": "mlb-663757",
+        "price": 25,
+        "teamId": "fantasy-team-8"
+      },
+      {
+        "playerId": "mlb-694192",
+        "price": 25,
+        "teamId": "fantasy-team-9"
+      },
+      {
+        "playerId": "mlb-681624",
+        "price": 24,
+        "teamId": "fantasy-team-10"
+      },
+      {
+        "playerId": "mlb-687263",
+        "price": 24,
+        "teamId": "fantasy-team-11"
+      },
+      {
+        "playerId": "mlb-665489",
+        "price": 24,
+        "teamId": "fantasy-team-12"
+      },
+      {
+        "playerId": "mlb-680776",
+        "price": 24,
+        "teamId": "fantasy-team-1"
+      },
+      {
+        "playerId": "mlb-682928",
+        "price": 24,
+        "teamId": "fantasy-team-2"
+      }
+    ],
+    "teamBudgets": {
+      "fantasy-team-1": 109,
+      "fantasy-team-2": 113,
+      "fantasy-team-3": 138,
+      "fantasy-team-4": 140,
+      "fantasy-team-5": 141,
+      "fantasy-team-6": 146,
+      "fantasy-team-7": 148,
+      "fantasy-team-8": 148,
+      "fantasy-team-9": 149,
+      "fantasy-team-10": 150,
+      "fantasy-team-11": 151,
+      "fantasy-team-12": 151
+    }
+  }
+}

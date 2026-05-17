@@ -1652,7 +1652,12 @@ function runValuations(leagueSettings = {}, draftState = {}) {
 
   const hitterCount  = valuations.filter((v) => v.statGroup === 'hitting').length;
   const pitcherCount = valuations.filter((v) => v.statGroup === 'pitching').length;
-  const totalValue   = valuations.reduce((s, v) => s + v.dollarValue, 0);
+  // For draft-state logic, "totalValue" should represent remaining (available) pool value.
+  // Purchased players are included in the response for UI value-gap display, but not in this
+  // remaining-pool total so the metric trends downward as the draft advances.
+  const remainingPoolValue = availableValuations.reduce((s, v) => s + v.dollarValue, 0);
+  const purchasedProjectedValue = purchasedValuations.reduce((s, v) => s + v.dollarValue, 0);
+  const totalValueIncludingPurchased = remainingPoolValue + purchasedProjectedValue;
   const isDraftActive = Array.isArray(draftState.purchasedPlayers)
     ? draftState.purchasedPlayers.length > 0
     : !!(draftState.teamBudgets || draftState.filledRosterSlots);
@@ -1667,10 +1672,13 @@ function runValuations(leagueSettings = {}, draftState = {}) {
     pitcherSlots:     effectiveSettings.numTeams * effectiveSettings.pitcherSlotsPerTeam,
     hitterCount,
     pitcherCount,
-    totalValue,
+    totalValue: remainingPoolValue,
+    remainingPoolValue,
+    purchasedProjectedValue,
+    totalValueIncludingPurchased,
     targetTotalValue: effectiveSettings.numTeams * effectiveSettings.budget,
     valuationCount:   valuations.length,
-    calibrationError: roundCurrency(totalValue - (effectiveSettings.numTeams * effectiveSettings.budget)),
+    calibrationError: roundCurrency(remainingPoolValue - (effectiveSettings.numTeams * effectiveSettings.budget)),
     isDraftActive,
     draftBudget:      effectiveSettings._draftBudgetMeta || null,
     rosterSlotConfig: {
