@@ -285,6 +285,7 @@ async function ingestStats({ force = false, season, group = 'all' } = {}) {
   return {
     hitting:  results.hitting  || null,
     pitching: results.pitching || null,
+    total: totalRows,
     durationMs,
   };
 }
